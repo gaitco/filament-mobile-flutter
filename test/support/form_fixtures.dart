@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:filament_mobile/data/action_result.dart';
 import 'package:filament_mobile/data/paginated_records.dart';
 import 'package:filament_mobile/data/options_page.dart';
 import 'package:filament_mobile/data/resource_data_source.dart';
@@ -178,6 +179,13 @@ class FakeSource implements ResourceDataSource {
   @override
   Future<WriteResult> destroy(String resourceKey, Object id) =>
       throw UnimplementedError();
+
+  @override
+  Future<ActionResult> runAction(
+    String resourceKey,
+    Object id,
+    String action,
+  ) => throw UnimplementedError();
 }
 
 /// Three flat fields — `name`, `country_id`, `city_id` — parsed through the

@@ -27,6 +27,9 @@ class FilamentStrings {
     this.cancel = 'Cancel',
     this.create = 'Create',
     this.edit = 'Edit',
+    this.actionDone = 'Done',
+    this.actionFailed = 'Could not run that action.',
+    this.actionConfirm = 'Confirm',
   });
 
   final String retry;
@@ -63,6 +66,16 @@ class FilamentStrings {
   /// the delete affordance does: no accessible name otherwise.
   final String create;
   final String edit;
+
+  /// Shown after an action that declared no success notification of its own.
+  final String actionDone;
+
+  /// Shown when an action's run fails and the server sent no message.
+  final String actionFailed;
+
+  /// The confirm button when an action requires confirmation but declared
+  /// no submit label of its own.
+  final String actionConfirm;
 
   static String _defaultMin(num bound) => 'Must be at least $bound';
   static String _defaultMax(num bound) => 'Must be at most $bound';

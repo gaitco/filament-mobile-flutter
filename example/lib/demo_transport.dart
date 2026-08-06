@@ -11,6 +11,30 @@ class DemoTransport implements FilamentTransport {
     'delete': true,
   };
 
+  // One plain action, one that confirms first — exercised on every record so
+  // the example app's record screen always has a button to tap.
+  static const List<Map<String, dynamic>> _actions = [
+    {
+      'name': 'feature',
+      'label': 'Mark as featured',
+      'color': 'success',
+      'icon': null,
+      'confirmation': null,
+    },
+    {
+      'name': 'archive',
+      'label': 'Archive',
+      'color': 'warning',
+      'icon': null,
+      'confirmation': {
+        'heading': 'Archive this?',
+        'description': 'It will be hidden from the shop until restored.',
+        'submit': 'Archive',
+        'cancel': 'Cancel',
+      },
+    },
+  ];
+
   static Map<String, dynamic> _resource(
     String key,
     String singular,
@@ -167,6 +191,7 @@ class DemoTransport implements FilamentTransport {
       return {
         'data': _rows(key).firstWhere((r) => r['id'] == id),
         'permissions': const {'view': true, 'update': true, 'delete': true},
+        'actions': _actions,
       };
     }
     final rows = _rows(key);
@@ -182,13 +207,25 @@ class DemoTransport implements FilamentTransport {
   }
 
   @override
-  Future<FilamentResponse> post(String path, Map<String, dynamic> body) async =>
-      const FilamentResponse(
-        statusCode: 200,
-        body: {
-          'data': {'id': 99},
-        },
-      );
+  Future<FilamentResponse> post(String path, Map<String, dynamic> body) async {
+    // .../{resource}/{record}/actions/{action} — the run-action path.
+    if (path.contains('/actions/')) {
+      final action = path.split('/').last;
+      final message = switch (action) {
+        'feature' => 'Marked as featured.',
+        'archive' => 'Archived.',
+        _ => null,
+      };
+      return FilamentResponse(statusCode: 200, body: {'message': message});
+    }
+
+    return const FilamentResponse(
+      statusCode: 200,
+      body: {
+        'data': {'id': 99},
+      },
+    );
+  }
 
   @override
   Future<FilamentResponse> put(String path, Map<String, dynamic> body) async =>

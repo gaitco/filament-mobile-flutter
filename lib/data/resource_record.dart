@@ -1,5 +1,7 @@
 import 'package:equatable/equatable.dart';
 
+import 'record_action.dart';
+
 /// One record from the panel.
 ///
 /// Records are runtime-shaped — the schema is only known at runtime — so there
@@ -10,12 +12,14 @@ class ResourceRecord extends Equatable {
     required this.id,
     this.attributes = const {},
     this.permissions = const {},
+    this.actions = const [],
   });
 
   factory ResourceRecord.fromJson(
     Map<String, dynamic> json,
     String recordKey, {
     Map<String, dynamic>? permissions,
+    List<dynamic>? actions,
   }) {
     final id = json[recordKey];
 
@@ -33,6 +37,11 @@ class ResourceRecord extends Equatable {
         for (final entry in (permissions ?? const {}).entries)
           if (entry.value is bool) entry.key: entry.value as bool,
       },
+      actions: [
+        for (final entry in actions ?? const [])
+          if (entry is Map<String, dynamic>)
+            if (RecordAction.fromJson(entry) case final action?) action,
+      ],
     );
   }
 
@@ -60,6 +69,10 @@ class ResourceRecord extends Equatable {
   /// Whether the user may perform [ability] on this specific record.
   /// Absent means denied — an unlisted ability is never assumed allowed.
   bool can(String ability) => permissions[ability] ?? false;
+
+  /// The actions the server published for THIS record, in its order.
+  /// Empty when the resource opted none in — never null.
+  final List<RecordAction> actions;
 
   /// Reads an attribute, resolving a dotted path into the nested objects the
   /// server builds from a card's relation field. A null anywhere along the

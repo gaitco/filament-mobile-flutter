@@ -1,4 +1,5 @@
 import 'package:filament_mobile/data/paginated_records.dart';
+import 'package:filament_mobile/data/action_result.dart';
 import 'package:filament_mobile/data/resource_data_source.dart';
 import 'package:filament_mobile/data/resource_record.dart';
 import 'package:filament_mobile/data/write_result.dart';
@@ -66,6 +67,13 @@ class _ListSource implements ResourceDataSource {
   @override
   Future<WriteResult> destroy(String resourceKey, Object id) =>
       throw UnimplementedError();
+
+  @override
+  Future<ActionResult> runAction(
+    String resourceKey,
+    Object id,
+    String action,
+  ) => throw UnimplementedError();
 
   @override
   Future<OptionsPage> options(

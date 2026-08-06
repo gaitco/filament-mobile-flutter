@@ -1,3 +1,4 @@
+import 'package:filament_mobile/data/action_result.dart';
 import 'package:filament_mobile/data/paginated_records.dart';
 import 'package:filament_mobile/data/resource_data_source.dart';
 import 'package:filament_mobile/data/resource_record.dart';
@@ -24,14 +25,23 @@ class FakeSource implements ResourceDataSource {
     this.error,
     this.recordPermissions = const {},
     this.deleteResult = const WriteSuccess({}),
+    this.recordActions = const [],
+    this.actionResult = const ActionSuccess(null),
   });
 
   final Object? error;
   final Map<String, dynamic> recordPermissions;
   final WriteResult deleteResult;
 
+  /// Raw action entries, parsed the same way the server payload is —
+  /// `ResourceRecord.fromJson`'s own `actions` param, not a `RecordAction`
+  /// list, so a test exercises the same parsing the real record does.
+  final List<dynamic> recordActions;
+  ActionResult actionResult;
+
   int recordCalls = 0;
   int deleteCalls = 0;
+  final List<String> ranActions = [];
 
   @override
   Future<ResourceRecord> record(String resourceKey, Object id) async {
@@ -42,6 +52,7 @@ class FakeSource implements ResourceDataSource {
       const {'id': 1, 'name': 'أحمد', 'is_active': true},
       'id',
       permissions: recordPermissions,
+      actions: recordActions,
     );
   }
 
@@ -49,6 +60,16 @@ class FakeSource implements ResourceDataSource {
   Future<WriteResult> destroy(String resourceKey, Object id) async {
     deleteCalls++;
     return deleteResult;
+  }
+
+  @override
+  Future<ActionResult> runAction(
+    String resourceKey,
+    Object id,
+    String action,
+  ) async {
+    ranActions.add(action);
+    return actionResult;
   }
 
   @override
@@ -414,6 +435,181 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('This action is unauthorized.'), findsOneWidget);
+    });
+
+    // Two actions, one with a confirmation — shared by the action tests below.
+    FakeSource actionSource({ActionResult? actionResult}) => FakeSource(
+      recordActions: const [
+        {'name': 'approve', 'label': 'Approve', 'color': 'success'},
+        {
+          'name': 'archive',
+          'label': 'Archive',
+          'color': 'gray',
+          'confirmation': {
+            'heading': 'Archive this?',
+            'submit': 'Yes, archive',
+            'cancel': 'Never mind',
+          },
+        },
+      ],
+      actionResult: actionResult ?? const ActionSuccess(null),
+    );
+
+    testWidgets('renders a button per published action', (tester) async {
+      // The screen renders what the server published, in its order — it has
+      // no list of its own and no opinion about which actions exist.
+      await tester.pumpWidget(viewHarness(source: actionSource()));
+      await pumpUntilFound(tester, find.text('Approve'));
+
+      expect(find.text('Approve'), findsOneWidget);
+      expect(find.text('Archive'), findsOneWidget);
+    });
+
+    testWidgets('renders no action affordance when the record publishes none', (
+      tester,
+    ) async {
+      await tester.pumpWidget(viewHarness());
+      await pumpUntilFound(tester, find.text('أحمد'));
+
+      expect(find.byKey(const ValueKey('record.action.approve')), findsNothing);
+    });
+
+    testWidgets('an action with no confirmation runs on the first tap', (
+      tester,
+    ) async {
+      final source = actionSource();
+      await tester.pumpWidget(viewHarness(source: source));
+      await pumpUntilFound(tester, find.text('Approve'));
+
+      await tester.tap(find.text('Approve'));
+      await tester.pumpAndSettle();
+
+      // The source saw exactly one run, with the action's own name.
+      expect(source.ranActions, ['approve']);
+    });
+
+    testWidgets(
+      'an action with a confirmation runs only after the user confirms',
+      (tester) async {
+        final source = actionSource();
+        await tester.pumpWidget(viewHarness(source: source));
+        await pumpUntilFound(tester, find.text('Archive'));
+
+        await tester.tap(find.text('Archive'));
+        await tester.pumpAndSettle();
+
+        // The dialog shows the action's OWN copy, not the package's generic
+        // delete strings.
+        expect(find.text('Archive this?'), findsOneWidget);
+        expect(source.ranActions, isEmpty);
+
+        await tester.tap(find.text('Yes, archive'));
+        await tester.pumpAndSettle();
+
+        expect(source.ranActions, ['archive']);
+      },
+    );
+
+    testWidgets('cancelling a confirmation runs nothing', (tester) async {
+      final source = actionSource();
+      await tester.pumpWidget(viewHarness(source: source));
+      await pumpUntilFound(tester, find.text('Archive'));
+
+      await tester.tap(find.text('Archive'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Never mind'));
+      await tester.pumpAndSettle();
+
+      expect(source.ranActions, isEmpty);
+    });
+
+    testWidgets('a successful run re-fetches the record', (tester) async {
+      // An action's most common effect is changing the permissions and
+      // actions the screen is holding, so a stale record is a wrong screen.
+      final source = actionSource();
+      await tester.pumpWidget(viewHarness(source: source));
+      await pumpUntilFound(tester, find.text('Approve'));
+
+      await tester.tap(find.text('Approve'));
+      await tester.pumpAndSettle();
+
+      expect(source.recordCalls, 2);
+    });
+
+    testWidgets(
+      'a failed run shows the server message and leaves the record alone',
+      (tester) async {
+        final source = actionSource(
+          actionResult: const ActionFailed('Cannot do that yet'),
+        );
+        await tester.pumpWidget(viewHarness(source: source));
+        await pumpUntilFound(tester, find.text('Approve'));
+
+        await tester.tap(find.text('Approve'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Cannot do that yet'), findsOneWidget);
+        expect(source.recordCalls, 1);
+      },
+    );
+
+    testWidgets(
+      'a fail-closed confirmation (empty submit/cancel) still prompts, '
+      'with the client\'s own labels',
+      (tester) async {
+        // The server emits a non-null confirmation with empty submit/cancel
+        // when its own evaluation throws — fail-closed, never "skip the
+        // prompt". A blank-labelled button is the same defect as no prompt
+        // at all, so this asserts on the visible label text, not just that
+        // a button exists.
+        final source = FakeSource(
+          recordActions: const [
+            {
+              'name': 'archive',
+              'label': 'Archive',
+              'confirmation': {
+                'heading': 'Archive this?',
+                'submit': '',
+                'cancel': '',
+              },
+            },
+          ],
+        );
+        await tester.pumpWidget(viewHarness(source: source));
+        await pumpUntilFound(tester, find.text('Archive'));
+
+        await tester.tap(find.text('Archive'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Archive this?'), findsOneWidget);
+        expect(find.text('Confirm'), findsOneWidget);
+        expect(find.text('Cancel'), findsOneWidget);
+        expect(source.ranActions, isEmpty);
+
+        await tester.tap(find.text('Confirm'));
+        await tester.pumpAndSettle();
+
+        expect(source.ranActions, ['archive']);
+      },
+    );
+
+    testWidgets('a degraded action (label == name, no color/icon) still '
+        'renders and still runs', (tester) async {
+      // The server sends this exact shape when the panel's label/color/icon
+      // closures threw — a cosmetic failure must never cost the user a
+      // capability they are authorized to use.
+      final source = FakeSource(
+        recordActions: const [
+          {'name': 'archive', 'label': 'archive'},
+        ],
+      );
+      await tester.pumpWidget(viewHarness(source: source));
+      await pumpUntilFound(tester, find.text('archive'));
+
+      await tester.tap(find.text('archive'));
+      await tester.pumpAndSettle();
+
+      expect(source.ranActions, ['archive']);
     });
 
     testWidgets('renders in RTL without overflow', (tester) async {

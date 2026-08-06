@@ -1,4 +1,6 @@
+export 'data/action_result.dart';
 export 'data/paginated_records.dart';
+export 'data/record_action.dart';
 export 'data/record_can.dart';
 export 'data/resource_data_source.dart';
 export 'data/resource_record.dart';

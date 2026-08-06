@@ -1,4 +1,5 @@
 import '../schema/panel_schema.dart';
+import 'action_result.dart';
 import 'options_page.dart';
 import '../schema/schema_component.dart';
 import 'paginated_records.dart';
@@ -37,6 +38,15 @@ abstract interface class ResourceDataSource {
 
   /// DELETE /{resource}/{id} — never throws on a 4xx; see [WriteResult].
   Future<WriteResult> destroy(String resourceKey, Object id);
+
+  /// POST /{resource}/{id}/actions/{action} — runs one of the record's own
+  /// [RecordAction]s. Never throws on a 4xx or 5xx; see [ActionResult].
+  ///
+  /// The caller re-fetches the record on success only: the action may have
+  /// changed fields, permissions or the action list itself, and this method
+  /// carries none of that back — only whether it ran. A failure leaves the
+  /// record untouched, so there is nothing to re-fetch.
+  Future<ActionResult> runAction(String resourceKey, Object id, String action);
 
   /// POST /{resource}/options — the options for a select whose list `/schema`
   /// refused to inline.

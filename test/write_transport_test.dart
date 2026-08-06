@@ -1,3 +1,4 @@
+import 'package:filament_mobile/data/action_result.dart';
 import 'package:filament_mobile/data/rest_resource_data_source.dart';
 import 'package:filament_mobile/data/write_result.dart';
 import 'package:filament_mobile/ports/filament_transport.dart';
@@ -85,6 +86,24 @@ void main() {
       expect((result as WriteFailed).message, 'لا يوجد اتصال');
     },
   );
+
+  test('a transport throw on runAction becomes ActionFailed, not an unhandled '
+      'error', () async {
+    // Same contract as the writes above: the transport throws on
+    // socket/DNS/timeout, and a tapped action button with no network must
+    // surface as a failed action — not an unhandled async error the user
+    // never sees.
+    final source = RestResourceDataSource(
+      transport: ThrowingTransport(
+        const FilamentTransportException('لا يوجد اتصال'),
+      ),
+    );
+
+    final result = await source.runAction('banners', 7, 'approve');
+
+    expect(result, isA<ActionFailed>());
+    expect((result as ActionFailed).message, 'لا يوجد اتصال');
+  });
 
   test('a 422 whose errors block is malformed still reports invalid', () async {
     // Degrading to "no field errors" is right; throwing here would turn a

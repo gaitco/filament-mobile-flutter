@@ -1,4 +1,6 @@
+import 'package:filament_mobile/data/action_result.dart';
 import 'package:filament_mobile/data/rest_resource_data_source.dart';
+import 'package:filament_mobile/ports/filament_transport.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/fake_transport.dart';
@@ -263,4 +265,68 @@ void main() {
 
     expect(transport.calls.last.query, {'page': '1'});
   });
+
+  test('record() parses the actions the server published for it', () async {
+    final transport = FakeTransport({
+      '/api/mobile-panel/schema': _panelJson,
+      '/api/mobile-panel/banners/7': {
+        'data': {'id': 7},
+        'permissions': {},
+        'actions': [
+          {
+            'name': 'approve',
+            'label': 'Approve',
+            'color': 'success',
+            'icon': 'heroicon-o-check',
+            'confirmation': null,
+          },
+        ],
+      },
+    });
+
+    final record = await sourceFor(transport).record('banners', 7);
+
+    expect(record.actions.single.name, 'approve');
+  });
+
+  test('runAction posts to the action endpoint and reports success', () async {
+    final transport = FakeTransport(
+      const {},
+      writes: {
+        'POST /api/mobile-panel/banners/7/actions/approve':
+            const FilamentResponse(
+              statusCode: 200,
+              body: {'message': 'Approved'},
+            ),
+      },
+    );
+    final source = sourceFor(transport);
+
+    final result = await source.runAction('banners', 7, 'approve');
+
+    expect(result, isA<ActionSuccess>());
+    expect((result as ActionSuccess).message, 'Approved');
+  });
+
+  test(
+    'a 422 is a failure carrying the server message, not a thrown error',
+    () async {
+      final transport = FakeTransport(
+        const {},
+        writes: {
+          'POST /api/mobile-panel/banners/7/actions/halting':
+              const FilamentResponse(
+                statusCode: 422,
+                body: {'message': 'Cannot do that yet'},
+              ),
+        },
+      );
+      final source = sourceFor(transport);
+
+      final result = await source.runAction('banners', 7, 'halting');
+
+      expect(result, isA<ActionFailed>());
+      expect((result as ActionFailed).message, 'Cannot do that yet');
+    },
+  );
 }

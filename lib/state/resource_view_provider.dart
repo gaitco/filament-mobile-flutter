@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import '../data/action_result.dart';
+import '../data/record_action.dart';
 import '../data/resource_data_source.dart';
 import '../data/resource_record.dart';
 import '../data/write_result.dart';
@@ -69,4 +71,22 @@ class ResourceViewProvider extends ChangeNotifier {
   /// own `_record`/`_status` describe a record that either no longer exists or
   /// was never touched — nothing here needs updating either way.
   Future<WriteResult> delete() => _source.destroy(resource.key, id);
+
+  /// Run [action] against this record and, on success, re-fetch — an
+  /// action's most common effect is changing exactly the `permissions` and
+  /// `actions` this provider is holding, so the pre-run record is stale the
+  /// moment the call succeeds.
+  ///
+  /// The result is returned rather than folded into [status]: the screen
+  /// decides whether the message is a snack bar or a banner, and a failed
+  /// action is not a failed screen — the record is still fine to display.
+  Future<ActionResult> runAction(RecordAction action) async {
+    final result = await _source.runAction(resource.key, id, action.name);
+
+    if (result is ActionSuccess) {
+      await load();
+    }
+
+    return result;
+  }
 }

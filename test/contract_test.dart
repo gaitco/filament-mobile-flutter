@@ -256,13 +256,13 @@ void main() {
 
     test('writable arrives from the real snapshot, not just a hand-built '
         'fixture', () {
-      // `tag_ids` is the field that motivated the key: a multi-valued
-      // relationship this package cannot persist, published as `disabled:
-      // true` before Task 3 gave the server a way to say "cannot persist"
-      // instead of overloading "disabled". Scoped to `banners`, the same
-      // reason `contact_email`/`body_html` above are: an unscoped search
-      // over every resource risks matching a same-named field elsewhere and
-      // never noticing this one was stripped.
+      // `tag_ids` motivated the key originally; the server now saves
+      // multi-valued relationships, so it arrives writable and the field
+      // that carries the lock in the real snapshot is `gated_tag_ids` —
+      // a relation select behind a `->disabled()` gate. Scoped to
+      // `banners`, the same reason `contact_email`/`body_html` above are:
+      // an unscoped search over every resource risks matching a same-named
+      // field elsewhere and never noticing this one was stripped.
       Iterable<SchemaComponent> flatten(Iterable<SchemaComponent> nodes) sync* {
         for (final node in nodes) {
           yield node;
@@ -274,7 +274,10 @@ void main() {
       final nodes = flatten([...banners.form, ...banners.infolist]).toList();
 
       final tagIds = nodes.firstWhere((n) => n.name == 'tag_ids');
-      expect(tagIds.writable, isFalse);
+      expect(tagIds.writable, isTrue);
+
+      final gated = nodes.firstWhere((n) => n.name == 'gated_tag_ids');
+      expect(gated.disabled, isTrue);
     });
 
     test('the real snapshot carries a group on a grouped resource', () {

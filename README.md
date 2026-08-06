@@ -107,3 +107,35 @@ save-failure banner rather than switching the whole screen — see
 **advisory and optional**, defaulting to `null`. A host that never sets it
 never trips `isUnauthenticated`; every failure still lands on `PanelFailure`,
 exactly as before this field existed.
+
+## Actions — buttons the server decided this record may run
+
+`ResourceRecord.actions` (`List<RecordAction>`, empty when the resource
+opted none in) is the per-record list `GET /{resource}/{record}` publishes.
+Absence means unavailable — there is no `enabled: false` to render greyed
+out, so `ResourceViewScreen` renders exactly one button per entry, colored
+through the same semantic vocabulary card badges use
+(`SemanticBadge.colorFor()`, now public), and no disabled ones.
+
+A `RecordAction` with a non-null `confirmation` is confirmed in the action's
+own words — `heading`/`description`/`submit`/`cancel` — never the package's
+generic delete-confirmation copy. An empty `submit` or `cancel` (the
+server's fail-closed shape for a confirmation whose own copy closure threw)
+is the client's cue to substitute its own string, not a signal to skip the
+prompt: `confirmation` being non-null already decided that.
+
+Run one through `ResourceDataSource.runAction(resourceKey, id, name)`, which
+returns a sealed `ActionResult` — `ActionSuccess(message)` or
+`ActionFailed(message)` — the same shape as `WriteResult` on the write path.
+`ResourceViewProvider.runAction()` calls it, shows `message` (or the
+package's own generic string) through the screen's existing snack-bar
+convention, and re-fetches the record on success: an action's most common
+effect is changing exactly `permissions` and `actions`, so the re-fetch
+refreshes both.
+
+Three more strings joined the `FilamentStrings` English-default rule above:
+`actionDone` (`'Done'`), `actionFailed` (`'Could not run that action.'`) and
+`actionConfirm` (`'Confirm'`). A host that upgrades and changes nothing
+still compiles and still runs — and, per the same caveat as every other
+default, shows English under server-translated action labels until the host
+supplies its own.

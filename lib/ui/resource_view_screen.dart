@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../data/action_result.dart';
+import '../data/record_action.dart';
 import '../data/record_can.dart';
 import '../data/resource_record.dart';
 import '../data/write_result.dart';
@@ -8,6 +10,7 @@ import '../ports/panel_view_state.dart';
 import '../state/resource_view_provider.dart';
 import 'entry_registry.dart';
 import 'material_panel_state_builder.dart';
+import 'semantic_badge.dart';
 
 /// One record's infolist.
 ///
@@ -142,6 +145,17 @@ class _ResourceViewScreenState extends State<ResourceViewScreen> {
           tooltip: widget.strings.deleteConfirm,
           onPressed: _confirmDelete,
         ),
+      // Published, not resolved here: the server already filtered these to
+      // what this record may run, the same division as `recordCan` above.
+      for (final action in record.actions)
+        TextButton(
+          key: ValueKey('record.action.${action.name}'),
+          style: TextButton.styleFrom(
+            foregroundColor: SemanticBadge.colorFor(action.color),
+          ),
+          onPressed: () => _runAction(action),
+          child: Text(action.label),
+        ),
     ];
   }
 
@@ -174,16 +188,71 @@ class _ResourceViewScreenState extends State<ResourceViewScreen> {
       case WriteSuccess() || WriteGone():
         Navigator.pop(context, true);
       case WriteDenied(:final message) || WriteFailed(:final message):
-        _showError(message);
+        _showMessage(message);
       // A delete request carries nothing to be invalid — this arm exists only
       // because the switch is exhaustive over the sealed type, not because
       // the server can send it here.
       case WriteInvalid():
-        _showError(widget.strings.saveFailed);
+        _showMessage(widget.strings.saveFailed);
     }
   }
 
-  void _showError(String message) {
+  /// Runs [action], asking first when it carries a confirmation.
+  ///
+  /// Confirmation copy is the action's OWN words, not the package's generic
+  /// delete strings — an empty `submit`/`cancel` (the server's fail-closed
+  /// shape, see [RecordActionConfirmation]) substitutes the client's own
+  /// label, it never means "skip the prompt": [confirmation] being non-null
+  /// already decided that.
+  Future<void> _runAction(RecordAction action) async {
+    final confirmation = action.confirmation;
+
+    if (confirmation != null) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(confirmation.heading),
+          content: confirmation.description == null
+              ? null
+              : Text(confirmation.description!),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(
+                confirmation.cancel.isEmpty
+                    ? widget.strings.cancel
+                    : confirmation.cancel,
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text(
+                confirmation.submit.isEmpty
+                    ? widget.strings.actionConfirm
+                    : confirmation.submit,
+              ),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed != true || !mounted) return;
+    }
+
+    final result = await widget.provider.runAction(action);
+    if (!mounted) return;
+
+    // The server's own message wins whenever it sent one — it is translated
+    // and specific; the package's default is neither.
+    final message = switch (result) {
+      ActionSuccess(:final message) => message ?? widget.strings.actionDone,
+      ActionFailed(:final message) => message ?? widget.strings.actionFailed,
+    };
+
+    _showMessage(message);
+  }
+
+  void _showMessage(String message) {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));

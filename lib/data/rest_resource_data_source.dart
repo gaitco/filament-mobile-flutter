@@ -2,6 +2,7 @@ import '../ports/filament_transport.dart';
 import '../schema/panel_schema.dart';
 import '../schema/resource_schema.dart';
 import '../schema/schema_component.dart';
+import 'action_result.dart';
 import 'options_page.dart';
 import 'paginated_records.dart';
 import 'resource_data_source.dart';
@@ -105,12 +106,43 @@ class RestResourceDataSource implements ResourceDataSource {
     }
 
     final permissions = response['permissions'];
+    final actions = response['actions'];
 
     return ResourceRecord.fromJson(
       data,
       resource.recordKey,
       permissions: permissions is Map<String, dynamic> ? permissions : null,
+      actions: actions is List ? actions : null,
     );
+  }
+
+  @override
+  Future<ActionResult> runAction(
+    String resourceKey,
+    Object id,
+    String action,
+  ) async {
+    try {
+      final response = await _transport.post(
+        '$prefix/$resourceKey/$id/actions/$action',
+        const {},
+      );
+
+      final message = response.body['message'];
+
+      // 2xx is the only success. Every other status — 403, 404, 422, 500 —
+      // is a refusal or a fault, and either leaves the record untouched
+      // from the client's point of view: only a success triggers the
+      // caller's re-fetch.
+      return response.statusCode >= 200 && response.statusCode < 300
+          ? ActionSuccess(message is String ? message : null)
+          : ActionFailed(message is String ? message : null);
+    } catch (e) {
+      // Same contract as create/update/destroy: the transport throws on
+      // socket/DNS/timeout, and a tapped button with no network must come
+      // back as a failed action, never an unhandled async error.
+      return ActionFailed(messageOf(e));
+    }
   }
 
   @override

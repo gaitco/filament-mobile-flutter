@@ -24,10 +24,17 @@ class SemanticBadge extends StatelessWidget {
     'gray': Color(0xFF6B7280),
   };
 
+  /// Looks up the colour for a semantic name (`success`, `danger`, …) — the
+  /// same vocabulary this badge itself maps values through. Shared so a
+  /// record action's own semantic colour and a badge entry's stay in the one
+  /// place; null (unrecognised or absent) means "no opinion, use the theme's
+  /// default".
+  static Color? colorFor(String? semantic) =>
+      semantic == null ? null : _palette[semantic];
+
   @override
   Widget build(BuildContext context) {
-    final semantic = colors[value];
-    final colour = semantic == null ? null : _palette[semantic];
+    final colour = colorFor(colors[value]);
 
     return Chip(
       label: Text(value),

@@ -1,7 +1,13 @@
+![filament_mobile](https://raw.githubusercontent.com/gaitco/filament-mobile-flutter/main/art/banner.png)
+
 # filament_mobile
 
 Renders a Laravel Filament 5 panel as a native Flutter mobile admin, driven by
 the JSON contract that `gait/filament-mobile` serves.
+
+![How it works](https://raw.githubusercontent.com/gaitco/filament-mobile-flutter/main/art/diagram.png)
+
+![Screens](https://raw.githubusercontent.com/gaitco/filament-mobile-flutter/main/art/showcase.png)
 
 ## Requirements
 

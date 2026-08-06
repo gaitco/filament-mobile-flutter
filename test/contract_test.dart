@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:filament_mobile/schema/panel_schema.dart';
-import 'package:filament_mobile/schema/resource_action.dart';
 import 'package:filament_mobile/schema/schema_component.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -118,26 +117,12 @@ void main() {
       ]);
     });
 
-    test('parses every action scope', () {
-      final actions = panel.resource('users')!.actions;
-      final byName = {for (final action in actions) action.name: action};
-
-      expect(byName['delete']!.destructive, isTrue);
-      expect(byName['delete']!.confirmation!.confirmLabel, 'حذف');
-      expect(byName['ban']!.form.single, isA<TextComponent>());
-      expect(byName['export']!.scope, ActionScope.header);
-      expect(byName['export']!.visible, isTrue);
-      expect(byName['impersonate']!.visible, isFalse);
-      expect(byName['bulk_delete']!.scope, ActionScope.bulk);
-    });
-
     test('a minimal resource parses with defaults', () {
       final posts = panel.resource('posts')!;
 
       expect(posts.recordKey, 'id');
       expect(posts.search.enabled, isFalse);
       expect(posts.form, isEmpty);
-      expect(posts.actions, isEmpty);
     });
   });
 

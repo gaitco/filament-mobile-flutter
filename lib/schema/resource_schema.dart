@@ -2,7 +2,6 @@ import 'package:equatable/equatable.dart';
 
 import 'card_layout.dart';
 import 'json_reader.dart';
-import 'resource_action.dart';
 import 'resource_labels.dart';
 import 'schema_component.dart';
 
@@ -77,7 +76,6 @@ class ResourceSchema extends Equatable {
     this.filters = const [],
     this.form = const [],
     this.infolist = const [],
-    this.actions = const [],
     this.group,
   });
 
@@ -112,7 +110,6 @@ class ResourceSchema extends Equatable {
       filters: SchemaComponent.listFromJson(json, 'filters', path),
       form: SchemaComponent.listFromJson(json, 'form', path),
       infolist: SchemaComponent.listFromJson(json, 'infolist', path),
-      actions: ResourceAction.listFromJson(json, 'actions', path),
       group: rawGroup?.isEmpty ?? false ? null : rawGroup,
     );
   }
@@ -155,7 +152,6 @@ class ResourceSchema extends Equatable {
   final List<SchemaComponent> filters;
   final List<SchemaComponent> form;
   final List<SchemaComponent> infolist;
-  final List<ResourceAction> actions;
   final String? group;
 
   ResourceSort? get defaultSort {

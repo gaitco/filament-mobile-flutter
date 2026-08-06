@@ -1,6 +1,5 @@
 import 'package:filament_mobile/data/rest_resource_data_source.dart';
 import 'package:filament_mobile/schema/card_layout.dart';
-import 'package:filament_mobile/schema/resource_action.dart';
 import 'package:filament_mobile/schema/schema_component.dart';
 import 'package:filament_mobile/schema/validation_rules.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -57,29 +56,6 @@ void main() {
           reason: '$type should parse without a config',
         );
       }
-    });
-  });
-
-  group('ResourceAction.confirmation', () {
-    test('a non-object confirmation throws rather than reading as absent', () {
-      expect(
-        () => ResourceAction.fromJson(const {
-          'name': 'delete',
-          'label': 'حذف',
-          'confirmation': 'yes',
-        }, 'resources[0].actions[0]'),
-        throwsAtPath('resources[0].actions[0].confirmation'),
-      );
-    });
-
-    test('an absent confirmation is still null', () {
-      final action = ResourceAction.fromJson(const {
-        'name': 'delete',
-        'label': 'حذف',
-        'requiresConfirmation': true,
-      }, 'actions[0]');
-      expect(action.requiresConfirmation, isTrue);
-      expect(action.confirmation, isNull);
     });
   });
 

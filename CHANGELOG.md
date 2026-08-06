@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.3.0 — 2026-08-06
+
+**Breaking.** The schema-level action types are gone: `ResourceAction`,
+`ActionScope`, `ActionConfirmation`, and `ResourceSchema.actions`.
+
+They came from the P0 design spec's §5.5 sketch — a resource-level `actions`
+array with `row`/`bulk`/`header` scope and inline modal forms. The Laravel
+package never emitted that key on `/schema`, and nothing in this package
+ever rendered it, so `ResourceSchema.actions` was always `[]` in practice
+and no host can be reading a value from it. Keeping them meant shipping two
+vocabularies for one word, which had already cost a naming collision:
+0.2.0's record-scoped confirmation had to be called
+`RecordActionConfirmation` because `ActionConfirmation` was taken by the
+dead type.
+
+**If you referenced any of them, delete the reference** — there is no
+replacement, because there was never a value. For actions that actually
+work, use `ResourceRecord.actions` and `RecordAction` from 0.2.0: they
+travel per-record on the record payload, because an action's visibility is
+a fact about one record rather than a static fact about a resource.
+
+The wire is unchanged. A server that sends a schema-level `actions` key
+(none does) now has it ignored rather than parsed.
+
 ## 0.2.0 — 2026-08-06
 
 - **Relation writes.** Server-side only — the write path already sent

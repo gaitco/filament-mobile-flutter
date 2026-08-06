@@ -43,9 +43,6 @@ void main() {
         'infolist': [
           {'type': 'text_entry', 'name': 'name'},
         ],
-        'actions': [
-          {'name': 'delete', 'label': 'حذف', 'destructive': true},
-        ],
       }, 'resources[0]');
 
       expect(resource.key, 'users');
@@ -60,7 +57,6 @@ void main() {
       expect(resource.filters.single, isA<SelectComponent>());
       expect(resource.form.single, isA<TextComponent>());
       expect(resource.infolist.single, isA<EntryComponent>());
-      expect(resource.actions.single.destructive, isTrue);
     });
 
     test('defaults recordKey to id and search to disabled', () {
@@ -73,7 +69,6 @@ void main() {
       expect(resource.search.enabled, isFalse);
       expect(resource.card, isNotNull);
       expect(resource.form, isEmpty);
-      expect(resource.actions, isEmpty);
     });
 
     test(

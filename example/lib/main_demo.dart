@@ -18,6 +18,7 @@ class DemoApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'filament_mobile demo',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(colorSchemeSeed: const Color(0xFF2A3154)),
       home: const _DemoHome(),
     );

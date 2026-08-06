@@ -127,15 +127,24 @@ prompt: `confirmation` being non-null already decided that.
 Run one through `ResourceDataSource.runAction(resourceKey, id, name)`, which
 returns a sealed `ActionResult` — `ActionSuccess(message)` or
 `ActionFailed(message)` — the same shape as `WriteResult` on the write path.
-`ResourceViewProvider.runAction()` calls it, shows `message` (or the
-package's own generic string) through the screen's existing snack-bar
-convention, and re-fetches the record on success: an action's most common
-effect is changing exactly `permissions` and `actions`, so the re-fetch
-refreshes both.
+`ResourceViewProvider.runAction()` calls it, shows `message` through the
+screen's existing snack-bar convention, and re-fetches the record on
+success: an action's most common effect is changing exactly `permissions`
+and `actions`, so the re-fetch refreshes both.
 
-Three more strings joined the `FilamentStrings` English-default rule above:
-`actionDone` (`'Done'`), `actionFailed` (`'Could not run that action.'`) and
-`actionConfirm` (`'Confirm'`). A host that upgrades and changes nothing
-still compiles and still runs — and, per the same caveat as every other
-default, shows English under server-translated action labels until the host
-supplies its own.
+**A success with no message shows nothing**, and that is deliberate.
+Filament only sends a notification when the action declared a title
+(`CanNotify::sendSuccessNotification()` guards on `filled($title)`), so an
+action without one is silent on the web panel — as is one that raises
+`Cancel`, which arrives here as a 200 with a null message. Showing a generic
+"done" would have the phone claim an outcome the panel never stated; the
+user's feedback is the record itself changing after the re-fetch. A **failed**
+action with no message does still fall back, because Filament marks failure
+notifications `->persistent()` and success ones not: on a phone, a tap that
+produces nothing at all cannot be told apart from a dead button.
+
+Two more strings joined the `FilamentStrings` English-default rule above:
+`actionFailed` (`'Could not run that action.'`) and `actionConfirm`
+(`'Confirm'`). A host that upgrades and changes nothing still compiles and
+still runs — and, per the same caveat as every other default, shows English
+under server-translated action labels until the host supplies its own.

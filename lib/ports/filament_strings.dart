@@ -27,7 +27,6 @@ class FilamentStrings {
     this.cancel = 'Cancel',
     this.create = 'Create',
     this.edit = 'Edit',
-    this.actionDone = 'Done',
     this.actionFailed = 'Could not run that action.',
     this.actionConfirm = 'Confirm',
   });
@@ -67,10 +66,11 @@ class FilamentStrings {
   final String create;
   final String edit;
 
-  /// Shown after an action that declared no success notification of its own.
-  final String actionDone;
-
   /// Shown when an action's run fails and the server sent no message.
+  ///
+  /// There is deliberately no success counterpart: an action that declared no
+  /// success notification is silent on the web panel, so it is silent here.
+  /// See `ResourceViewScreen._runAction()` for why failure is not symmetric.
   final String actionFailed;
 
   /// The confirm button when an action requires confirmation but declared

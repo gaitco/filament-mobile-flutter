@@ -244,12 +244,27 @@ class _ResourceViewScreenState extends State<ResourceViewScreen> {
 
     // The server's own message wins whenever it sent one — it is translated
     // and specific; the package's default is neither.
+    //
+    // A NULL message on success shows nothing, deliberately. Filament sends a
+    // notification only when the action declared a title
+    // (`CanNotify::sendSuccessNotification()` guards on `filled($title)`), so
+    // an action without one is silent on the web panel, and a `Cancel` — which
+    // reaches here as a 200 with no message — is silent there too. Inventing a
+    // confirmation the panel never wrote would have the phone claim an outcome
+    // the web does not. The re-fetch is the feedback: the record on screen
+    // changes under the user.
+    //
+    // A null FAILURE still falls back, and the asymmetry is Filament's own:
+    // it marks failure notifications `->persistent()` and success ones not. A
+    // silent failure on the web still leaves a page the user can read; on a
+    // phone, a tap that produces nothing at all cannot be told apart from a
+    // dead button.
     final message = switch (result) {
-      ActionSuccess(:final message) => message ?? widget.strings.actionDone,
+      ActionSuccess(:final message) => message,
       ActionFailed(:final message) => message ?? widget.strings.actionFailed,
     };
 
-    _showMessage(message);
+    if (message != null) _showMessage(message);
   }
 
   void _showMessage(String message) {

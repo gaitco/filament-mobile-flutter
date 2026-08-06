@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.4.0 — 2026-08-06
+
+**The client no longer invents a confirmation the panel never wrote.**
+
+A successful action whose server response carries no message now shows no
+snack bar. Filament sends a notification only when the action declared a
+title — `CanNotify::sendSuccessNotification()` guards on
+`filled($notification?->getTitle())` — so an action with no success title is
+silent on the web panel, and an action that raises `Cancel` (which reaches
+the client as a 200 with a null message) is silent there too. 0.2.0 showed a
+generic "Done" for both, which claimed an outcome the panel had not stated.
+The record re-fetch still happens, so the user's feedback is the record
+changing on screen.
+
+A **failed** action with no message still falls back to `actionFailed`, and
+the asymmetry is Filament's own: it marks failure notifications
+`->persistent()` and success ones not. A silent failure on the web still
+leaves a page the user can read; on a phone a tap that produces nothing is
+indistinguishable from a dead button.
+
+**Breaking:** `FilamentStrings.actionDone` is removed — nothing renders it
+any more. If you passed it, delete the argument; there is no replacement,
+because the case it covered is now silence.
+
+The wire is unchanged. No server release accompanies this.
+
 ## 0.3.0 — 2026-08-06
 
 **Breaking.** The schema-level action types are gone: `ResourceAction`,

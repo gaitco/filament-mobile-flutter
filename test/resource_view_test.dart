@@ -553,6 +553,49 @@ void main() {
       },
     );
 
+    testWidgets('a success the server said nothing about shows no snack bar', (
+      tester,
+    ) async {
+      // Filament only sends a notification when the action declared a
+      // title (`CanNotify::sendSuccessNotification()` guards on
+      // `filled($title)`), so an action with no success title is SILENT on
+      // the web panel. A `Cancel` reaches here the same way — 200 with a
+      // null message — and inventing a "Done" toast for either one is the
+      // phone claiming something the panel never said. The re-fetch is the
+      // feedback: the record on screen changes.
+      final source = actionSource(actionResult: const ActionSuccess(null));
+      await tester.pumpWidget(viewHarness(source: source));
+      await pumpUntilFound(tester, find.text('Approve'));
+
+      await tester.tap(find.text('Approve'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(SnackBar), findsNothing);
+      // Still re-fetched — silence is about the toast, not the refresh.
+      expect(source.recordCalls, 2);
+    });
+
+    testWidgets(
+      'a failure the server said nothing about still shows the fallback',
+      (tester) async {
+        // Deliberately NOT symmetric with the success case above, and
+        // Filament's own asymmetry is the reason: it marks failure
+        // notifications `->persistent()` and success ones not. On the web a
+        // silent failure still leaves the user looking at a page that did
+        // not change in a context they can read; on a phone, a tap that
+        // produces nothing at all is indistinguishable from a dead button.
+        final source = actionSource(actionResult: const ActionFailed(null));
+        await tester.pumpWidget(viewHarness(source: source));
+        await pumpUntilFound(tester, find.text('Approve'));
+
+        await tester.tap(find.text('Approve'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(SnackBar), findsOneWidget);
+        expect(source.recordCalls, 1);
+      },
+    );
+
     testWidgets(
       'a fail-closed confirmation (empty submit/cancel) still prompts, '
       'with the client\'s own labels',

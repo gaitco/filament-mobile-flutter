@@ -2,8 +2,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../data/resource_record.dart';
+import '../schema/rich_document.dart';
 import '../schema/schema_component.dart';
 import 'entries/entry_widgets.dart';
+import 'entries/rich_entry_tile.dart';
 
 typedef EntryBuilder =
     Widget Function(
@@ -18,11 +20,20 @@ typedef EntryBuilder =
 /// about how that type behaves as a form field, which is `FieldRegistry`'s
 /// concern.
 class EntryRegistry {
-  EntryRegistry._(this._builders);
+  EntryRegistry._(this._builders, {this.onLinkTap});
 
-  factory EntryRegistry.defaults() => EntryRegistry._({});
+  factory EntryRegistry.defaults({void Function(String href)? onLinkTap}) =>
+      EntryRegistry._({}, onLinkTap: onLinkTap);
 
   final Map<String, EntryBuilder> _builders;
+
+  /// Forwarded to every `RichEntryTile` this registry builds. A host that
+  /// wants tappable links constructs `EntryRegistry.defaults(onLinkTap: ...)`
+  /// and passes it as `ResourceViewScreen.registry` — the same override
+  /// point `signature_pad` uses in the tests, not a new one. Null (the
+  /// default) means no host has wired it; see `RichEntryTile`'s doc for what
+  /// that renders.
+  final void Function(String href)? onLinkTap;
 
   void register(String type, EntryBuilder builder) {
     _builders[type] = builder;
@@ -70,11 +81,39 @@ class EntryRegistry {
         value: value?.toString(),
         colors: component.colors,
       ),
+      EntryKind.rich => _richEntry(component, value, record),
       EntryKind.text || EntryKind.date => EntryTile(
         label: component.label,
         value: value?.toString(),
       ),
     };
+  }
+
+  /// `EntryKind.rich` reads `<name>.__rich` — the flat sibling
+  /// `RecordSerializer` publishes beside the raw column (design spec, "Wire
+  /// shape") — and renders the parsed document. No sibling (nothing to
+  /// convert, or a `->prose()`-only entry `index()` never resolves for)
+  /// falls back to the raw string, exactly like `text`/`date`: absence means
+  /// unavailable, never a broken render.
+  Widget _richEntry(
+    EntryComponent component,
+    Object? value,
+    ResourceRecord record,
+  ) {
+    final name = component.name;
+    final richJson = name == null
+        ? null
+        : record.get<Map<String, dynamic>>('$name.__rich');
+
+    if (richJson == null) {
+      return EntryTile(label: component.label, value: value?.toString());
+    }
+
+    return RichEntryTile(
+      label: component.label,
+      document: RichDocument.fromJson(richJson, '$name.__rich'),
+      onLinkTap: onLinkTap,
+    );
   }
 
   /// A type this build cannot render. Visible in debug so a developer sees it

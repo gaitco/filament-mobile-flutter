@@ -1,4 +1,6 @@
+import 'package:filament_mobile/ports/filament_conditional_transport.dart';
 import 'package:filament_mobile/ports/filament_transport.dart';
+import 'package:filament_mobile/ports/filament_upload_transport.dart';
 
 /// Records every call and returns queued responses, so a test can assert the
 /// exact path and query the data source built.
@@ -55,6 +57,90 @@ class FakeTransport implements FilamentTransport {
       throw StateError('FakeTransport has no response queued for `$key`');
     }
     return response;
+  }
+}
+
+/// A [FakeTransport] that also implements the optional upload port, so a
+/// test can drive `uploadFile()` all the way to a real transport call.
+///
+/// A second class rather than folding this onto [FakeTransport] itself: a
+/// test asserting the missing-port case needs a transport that genuinely
+/// does not implement [FilamentUploadTransport], and `FakeTransport is
+/// FilamentUploadTransport` must stay false for that to mean anything.
+class FakeUploadTransport extends FakeTransport
+    implements FilamentUploadTransport {
+  FakeUploadTransport(
+    super.responses, {
+    super.writes,
+    this.uploadResponse,
+    this.uploadError,
+  });
+
+  final FilamentResponse? uploadResponse;
+  final Object? uploadError;
+
+  ({String path, List<int> bytes, String filename, String field})? lastUpload;
+
+  @override
+  Future<FilamentResponse> upload(
+    String path, {
+    required List<int> bytes,
+    required String filename,
+    String field = 'file',
+  }) async {
+    lastUpload = (path: path, bytes: bytes, filename: filename, field: field);
+
+    if (errorToThrow != null) throw errorToThrow!;
+    if (uploadError != null) throw uploadError!;
+
+    final response = uploadResponse;
+    if (response == null) {
+      throw StateError('FakeUploadTransport has no upload response queued.');
+    }
+    return response;
+  }
+}
+
+/// A [FakeTransport] that also implements the optional conditional-GET port,
+/// so a test can drive revalidation (etag sent, 304 vs 200) all the way to a
+/// real transport call.
+///
+/// A second class rather than folding this onto [FakeTransport] itself, same
+/// reasoning as [FakeUploadTransport]: a test asserting the no-conditional-
+/// port fallback needs a transport that genuinely does not implement
+/// [FilamentConditionalTransport].
+class FakeConditionalTransport extends FakeTransport
+    implements FilamentConditionalTransport {
+  FakeConditionalTransport(
+    super.responses, {
+    super.writes,
+    Map<String, List<ConditionalResponse>>? conditionalResponses,
+  }) : _conditionalResponses = {
+         for (final entry in (conditionalResponses ?? const {}).entries)
+           entry.key: List.of(entry.value),
+       };
+
+  final Map<String, List<ConditionalResponse>> _conditionalResponses;
+
+  final List<({String path, String? etag})> conditionalCalls = [];
+
+  @override
+  Future<ConditionalResponse> getConditional(
+    String path, {
+    String? etag,
+  }) async {
+    conditionalCalls.add((path: path, etag: etag));
+
+    if (errorToThrow != null) throw errorToThrow!;
+
+    final queue = _conditionalResponses[path];
+    if (queue == null || queue.isEmpty) {
+      throw StateError(
+        'FakeConditionalTransport has no conditional response queued for '
+        '`$path`',
+      );
+    }
+    return queue.removeAt(0);
   }
 }
 

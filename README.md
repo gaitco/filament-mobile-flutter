@@ -148,3 +148,882 @@ Two more strings joined the `FilamentStrings` English-default rule above:
 (`'Confirm'`). A host that upgrades and changes nothing still compiles and
 still runs — and, per the same caveat as every other default, shows English
 under server-translated action labels until the host supplies its own.
+
+## Upload — the host supplies transport and picker
+
+A single-file `FileUpload` field is editable from the phone, through two
+separate host-supplied pieces — same escape-hatch shape `chartBuilder`
+already established for dashboard charts, and for the same reason: keeping
+this package's two runtime dependencies (`flutter`, `equatable`) real for
+every host, including the ones with no upload feature at all.
+
+### Why upload is a second interface, not a fifth `FilamentTransport` method
+
+`FilamentTransport` is an `abstract interface class`, and every host
+implements it with `implements`. `implements` inherits the interface but
+never an implementation, so adding a member to it — even one with a default
+body — is a compile error (`non_abstract_class_inherits_abstract_member`) in
+every existing host, verified against the analyzer rather than assumed.
+Bytes don't fit in `post()`'s JSON body either: base64-encoding a 10 MB
+photo produces roughly 13 MB of JSON held whole in memory on both ends, and
+collides with PHP's `post_max_size`/`memory_limit` in ways that read as
+server bugs, not client ones.
+
+So upload is `FilamentUploadTransport`, a **separate, optional** port:
+
+```dart
+abstract interface class FilamentUploadTransport {
+  Future<FilamentResponse> upload(
+    String path, {
+    required List<int> bytes,
+    required String filename,
+    String field = 'file',
+  });
+}
+```
+
+A host that never uploads is untouched. A host that does implements both —
+`class MyTransport implements FilamentTransport, FilamentUploadTransport`.
+`RestResourceDataSource.uploadFile()` checks `transport is
+FilamentUploadTransport` at call time; when it is not, the upload fails with
+a message naming what to implement, never a throw the caller has to guard
+against. Here is a full, real implementation over `package:http` — the
+example app's, unedited:
+
+```dart
+@override
+Future<FilamentResponse> upload(
+  String path, {
+  required List<int> bytes,
+  required String filename,
+  String field = 'file',
+}) async {
+  final request = http.MultipartRequest('POST', Uri.parse('$baseUrl$path'))
+    ..headers.addAll(_headers)
+    ..fields['field'] = field
+    ..files.add(
+      http.MultipartFile.fromBytes('file', bytes, filename: filename),
+    );
+
+  final response = await http.Response.fromStream(
+    await _client.send(request),
+  );
+
+  return FilamentResponse(
+    statusCode: response.statusCode,
+    body: response.body.isEmpty
+        ? const {}
+        : jsonDecode(response.body) as Map<String, dynamic>,
+  );
+}
+```
+
+Three statements. That brevity is the point: `package:http`'s
+`MultipartRequest` already does the encoding work, so implementing this port
+costs a host nothing beyond what it would write anyway to call the endpoint
+directly.
+
+### The host also supplies the file picker
+
+Choosing a file needs a platform plugin this package will not force on a
+host with no upload feature, so `ResourceFormScreen` takes an optional
+`filePicker`:
+
+```dart
+typedef FilamentFilePicker = Future<PickedFile?> Function(SchemaComponent field);
+
+class PickedFile {
+  const PickedFile({required this.bytes, required this.filename});
+  final List<int> bytes;
+  final String filename;
+}
+```
+
+An `image_picker`-backed one is a few lines:
+
+```dart
+ResourceFormScreen(
+  // ...
+  filePicker: (field) async {
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
+    if (picked == null) return null;
+    return PickedFile(
+      bytes: await picked.readAsBytes(),
+      filename: picked.name,
+    );
+  },
+)
+```
+
+Returning `null` means the user cancelled; the field does nothing further,
+same as any other cancelled picker. A picker that throws (a real plugin's
+common failure — a denied permission) shows `FilamentStrings.uploadFailed`
+rather than crashing the form.
+
+**Without a `filePicker`, or without a transport implementing
+`FilamentUploadTransport`, the field stays read-only** and shows
+`FilamentStrings.filePickerUnavailable` — never a control that looks
+tappable but cannot work, the same rule `chartUnavailable` follows for a
+missing chart renderer. **`readOnly` from the server always wins over a
+host-supplied picker**: a field the panel published `config.readOnly: true`
+for (a multi-file field, or one whose constraints closure throws
+server-side) shows `FilamentStrings.fileFieldReadOnly` and stays inert even
+when the host wired up both pieces — the server's word is the gate, the
+picker only fills in what the server already allowed.
+
+### Upload happens on pick, not on save
+
+Tapping choose runs the picker, then immediately calls
+`ResourceDataSource.uploadFile()` — the control shows
+`FilamentStrings.uploading` and disables itself for the duration, so a slow
+upload cannot be double-fired by an impatient second tap. On success the
+field's value becomes the returned path and the stored filename is shown; a
+failed upload never clears whatever value the field already held.
+
+`ResourceDataSource.uploadFile()` returns a sealed `UploadResult` — the same
+shape as `ActionResult` — `UploadSuccess(path)` or `UploadFailed(message,
+{statusCode})`, so a caller's `switch` is exhaustive.
+
+A `422` (`statusCode == 422`) is this field's own refusal — too large, wrong
+type — and lands on the field's error exactly like a write's per-field
+validation error. Every other failure (a bare 403/500, an offline
+transport, a host transport lacking the upload port) is not a fact about
+what the user picked, so it reaches the form's error banner instead — the
+same split `submit()` already makes between field-scoped and form-scoped
+failures.
+
+### Known weaknesses, carried from the server or inherent to the port
+
+- **Orphaned files accumulate.** A user who picks a file and abandons the
+  form leaves a stored file with no row pointing at it. This package does
+  not claim or clean these up; a host that cares prunes the storage
+  directory on its own schedule — see the Laravel README's Upload section.
+- **No upload progress percentage.** `FilamentUploadTransport.upload()`
+  returns a `Future`, not a stream, so the control can show "uploading…" but
+  not "43%". A percentage would need a streaming port; revisit only if a
+  real panel wants it.
+- **The whole file sits in memory.** Both the picker's `PickedFile.bytes`
+  and the multipart request body hold the file whole — a very large file on
+  a low-memory device can fail before the server ever sees it. The field's
+  own `maxSize`, enforced server-side, is the practical bound today.
+- **Multi-file remains unusable.** A `FileUpload::multiple()` field
+  publishes `config.readOnly: true` and shows `fileFieldReadOnly`
+  permanently — this slice has nowhere on the server to save more than one
+  path per column.
+
+## Repeater — add and remove rows, validated per row
+
+A JSON-column `Repeater::make('items')->schema([...])` field parses into
+`RepeaterComponent` (`children` — the item template, published once, never
+once per row — plus `addable`, `deletable`, `minItems`, `maxItems`,
+`itemLabel`, `readOnly`) and renders through `RepeaterFieldWidget`: one
+`Card` per row from the template, an **Add** control when `addable` and the
+row count is under `maxItems`, and a **Remove** per row when `deletable` and
+the row count is above `minItems`. A row's values live in the form state
+under the repeater's own name as a genuine `List<Map>` — `FormValues` treats
+the whole array as one leaf, the client-side mirror of the server's own
+name-space split (see the Laravel README's Repeater section): the row
+template's field names never flatten into the top-level form.
+
+Both controls, and every field inside a row, honour `state.enabled` and
+`readOnly` — the server's word wins, same as an upload field: a repeater the
+panel published `config.readOnly: true` for shows the new `repeaterReadOnly`
+string and stays inert even if the host's own gates would otherwise allow
+editing. The server publishes that flag for three shapes (see below): a
+relationship repeater, a nested one, and one whose item template holds a
+child the server cannot round-trip.
+
+Each row's fields are built through **the host's own `FieldRegistry`** — the
+same one that built the repeater — so a `FieldRegistry.register()` custom
+type, or a host override of a built-in one, renders inside a row exactly as
+it does everywhere else on the form.
+
+**Per-row validation reuses the existing client validator against each row's
+own rules**, so a required field left blank in row 2 blocks submission with
+the error attached to row 2, not a generic whole-form error. A server `422`
+does the same on the authoritative side: Laravel's own shape for a repeater's
+per-item rule failure is `line_items.0.sku`, and `ResourceFormProvider`
+matches that shape directly — first segment against the writable repeaters on
+screen, and **exactly three segments**, which is the depth this widget can key
+an error into. A deeper key belongs to a nested repeater
+(`outer.0.inner.1.x`), which nothing on screen can render, so it goes to the
+form's error banner unattributed rather than into a map no widget reads: a
+refusal the user cannot see is a Save that does nothing and says nothing.
+A row-scoped error at the renderable depth lands in the exact same map
+`FieldState.errors` already reads for a client-side one. Editing a
+row clears that row's stale errors specifically: a repeater's `onChanged`
+always replaces the *whole* row list, so `change()` compares each row's
+identity against the previous list and clears only the errors for rows that
+actually changed — a still-invalid sibling row keeps its message.
+
+Three new `FilamentStrings`, all English-default: `addItem` ('Add item'),
+`removeItem` ('Remove'), and `repeaterReadOnly` ('These items cannot be
+changed.') — same rule as every other string in this package: a host that
+upgrades and changes nothing still compiles, still runs, and shows English
+under otherwise-translated labels until it supplies its own.
+
+### Known weaknesses, stated now
+
+- **No reordering.** The server may publish `config.reorderable: true` for a
+  host rendering its own repeater; `RepeaterFieldWidget` never offers it
+  regardless of what is published.
+- **The item template is static.** A `live()` field inside a row does not
+  re-settle that row — `/state` settles a flat form, and a row coordinate is
+  a problem this slice does not solve.
+- **A relationship repeater is read-only.** `Repeater::relationship()`
+  writes child rows through Filament's own `saveRelationships()`, which this
+  package's write path never calls; the field publishes `config.readOnly:
+  true` and this widget honours it, same as any other server-side gate.
+- **A nested repeater renders read-only.** A repeater inside another
+  repeater's item template is published `config.readOnly: true` by the
+  server, and this widget honours that flag like any other — the nesting
+  needs no special case here. Its rows still round-trip (they are part of
+  the outer array); they simply cannot be edited from a phone, because a
+  nested row's `422` comes back keyed `outer.0.inner.1.x` and this widget
+  has no field to render it against — that message reaches the form's error
+  banner instead, so a save the server refuses always says something. Two
+  levels of row coordinate is a different problem, and
+  `filament-mobile:doctor` reports the shape server-side.
+- **A repeater with a child the server cannot round-trip is read-only.** A
+  `Hidden`, an unmapped component, a `disabled()` field, or a relation-write
+  child forced back into the row with `->dehydrated(true)` in the item
+  template means the whole array write would delete that child's key from
+  every row, so the server refuses the field outright rather than offering a
+  control that eats data. Its stored rows are still returned on `GET` and
+  still render, inert. `doctor` names the offending child.
+- **A `select` with `optionsUrl` inside a row renders an empty dropdown.**
+  `FieldState.searchOptions` is not threaded into a row's children, so an
+  async-options select in a repeater has nothing to fetch with. Degraded but
+  honest; off-pattern only in that it does not say why.
+
+**Why `readOnly` defaults to `true` when the key is absent:** an absent
+`config.readOnly` means a server predating repeater support, and this client
+never invents a capability the server did not declare — so it renders inert
+rather than guessing it can accept edits. A server on this contract states
+the key **both ways round** (`false` for an ordinary JSON-column repeater,
+`true` for a refused one), so the default is only ever reached by an older
+server. It is asserted end-to-end, not assumed: `laravel_contract_test.dart`
+parses the committed `contract/laravel-panel.json` — real Laravel output —
+and asserts an ordinary repeater arrives editable while a relationship one
+and one with a non-round-tripping child do not. That test exists because the first cut of P6c had the server
+publishing the key for the refused case only, which rendered every ordinary
+repeater inert with both packages' own suites green.
+
+## Relations — a labelled section on the record screen, "See all" opens the full list
+
+`ResourceSchema.relations` (`List<RelationDescriptor>`, **always present** —
+`[]` when the server publishes none, and read the same way on an *absent*
+`relations` key: a server predating this feature) is what a resource's
+Filament relation managers become on mobile. This is a **read-only** list:
+no create, edit, delete, attach or detach, and no filters, search or
+sorting — see the Laravel README's Relations section for the full server
+picture, including why a relation manager that narrows its own query is not
+published at all.
+
+Each `RelationDescriptor` carries `key`, `label`, `card` (the same
+`CardLayout` a resource's own list card uses), and `recordKey` — the
+**related** model's own route key, not the parent resource's, and not
+always `id`. `RestResourceDataSource.relation()` parses each row by
+`relation.recordKey`, never the parent's.
+
+### The section, and where it fetches from
+
+`ResourceViewScreen` renders one `RelationSectionWidget` per entry in
+`resource.relations` automatically — nothing a host has to wire for a
+published relation to appear. Each section fetches its own first page
+independently of the record's own load, through
+`ResourceDataSource.relation(resourceKey, id, relation, {page})`:
+
+```dart
+abstract interface class ResourceDataSource {
+  // ...
+  Future<PaginatedRecords> relation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation, {
+    int page = 1,
+  });
+}
+```
+
+**This is a member on `ResourceDataSource`, not a port, and no port gained
+one.** `lib/ports/*` (`FilamentTransport` and friends) are what a host
+implements directly over its own HTTP client; `ResourceDataSource` lives in
+`lib/data/`, is implemented in production only by
+`RestResourceDataSource`, and gains a member almost every release — a host
+on `RestResourceDataSource` needs no change at all. Fetching goes through
+the data source, not a host-supplied closure — an earlier cut of this
+feature took a raw `Future<Map<String, dynamic>> Function()` from the host
+and was corrected before release: a screen given no closure rendered
+nothing for a published relation, which is exactly the class of bug this
+package's own read path exists to prevent.
+
+One section's slow or failing endpoint never blocks or blanks its
+siblings — each owns its own request and its own loading/empty/failure
+state, the same isolation `ResourceViewScreen`'s own record load already
+has from its relation sections.
+
+**A relation that loaded successfully with zero rows renders an empty
+state, never an absent section — and the reverse holds too: a relation the
+server did not publish renders no section at all.** Empty and absent are
+different statements, and this widget is what keeps them looking different
+on screen; a failed load renders `FilamentStrings.relationFailed`,
+never a spinner left spinning — the exact incident recorded in
+`docs/superpowers/HANDOFF.md` that this package's standing pilot lesson is
+aimed at.
+
+### "See all" — host-owned navigation, absent when unwired
+
+A section shows a "See all" affordance only once its first page reports
+more rows than it displayed. Tapping it calls `ResourceViewScreen`'s
+optional `onSeeAllTap`:
+
+```dart
+ResourceViewScreen(
+  provider: viewProvider,
+  onSeeAllTap: (relation, recordId) => Navigator.of(context).push(
+    MaterialPageRoute(
+      builder: (context) => RelationListScreen(
+        provider: RelationListProvider(
+          source: dataSource,
+          resourceKey: resource.key,
+          id: recordId,
+          relation: relation,
+        ),
+      ),
+    ),
+  ),
+)
+```
+
+**A host that never wires `onSeeAllTap` gets no button at all** — the same
+absence-not-disabled rule `onEditTap`/`onCreateTap` already follow in this
+package: a control the host cannot actually drive must not render enabled
+and silently no-op on tap. Where to push, and with what navigator, is
+entirely the host's call; this package has no router opinion.
+
+### The full list — `RelationListScreen` / `RelationListProvider`
+
+`RelationListProvider` mirrors `ResourceListProvider`'s shape (`status`,
+`records`, `errorMessage`, `isUnauthenticated`, `hasMore`, `isLoadingMore`,
+scroll-triggered `loadMore()`) but fetches through
+`ResourceDataSource.relation()` instead of `.list()`, and owns its own
+`ResourceDataSource` directly rather than taking a host-wired closure — the
+same seam the section widget uses. `RelationListScreen` mirrors
+`ResourceListScreen`'s skeleton, scroll pagination and `PanelViewState`
+mapping, reusing the same `CardListSkeleton`/`PaginatedCardList` widgets
+both screens share — but carries **no search field and no sort button**:
+`RelationDescriptor` has neither a `search` nor a `sorts` block to build
+them from, because a relation manager's own filters, search and sort are
+not part of this slice's contract at all. The screen's title is the
+relation's own `label`.
+
+Three new `FilamentStrings`, all English-default, same rule as every other
+string in this package: `seeAll` (`'See all'`), `relationEmpty`
+(`'Nothing here yet'`), `relationFailed` (`'Could not load'`).
+
+### Known weaknesses, stated now
+
+- **A relation manager that narrows its own query is invisible on
+  mobile.** The server refuses to publish it at all — see the Laravel
+  README's Relations section for why — so there is nothing here for this
+  client to render around it.
+- **The section loads once, in `initState`, and does not refresh after a
+  record action.** `RelationSectionWidget._load()` has exactly one caller;
+  there is no `didUpdateWidget` and no listener on the parent record's own
+  reload. A relation section shows stale rows after an action that changes
+  the relation's membership until the user leaves the screen and returns.
+  Tracked in `docs/superpowers/HANDOFF.md`.
+- **The relation manager's filters, search and sorting are ignored.** The
+  list arrives in relation order, unfiltered — matching the server exactly,
+  which itself does not evaluate them.
+- **Only the first two columns become a card**, because the server only
+  derives that many. A relation whose meaning lives in its third column
+  looks empty of information on the phone too.
+- **Nothing is writable.** No create, edit, delete, attach or detach — the
+  section and the full list are both read paths only.
+
+## Rich text — the document renders; links are host-wired, absent when unwired
+
+An infolist entry with `EntryKind.rich` (a `->prose()` `TextEntry`, or a
+model column registered with `HasRichContent`) renders as an actual
+document via `RichEntryTile`, this package's own export — headings,
+bulleted and numbered lists, blockquotes, horizontal rules, images, and
+bold/italic/strike/underline/code, using `RichText`/`Column`, this
+package's two runtime dependencies unchanged. A card slot bound to the same
+column shows its flattened plain text, never the raw markup: the record's
+`<path>.__rich` sibling (`{"doc": …, "text": …}`) is absent entirely when
+the server had nothing to convert, and every consumer without it falls
+back to today's raw string.
+
+`RichDocument.fromJson` parses the `<path>.__rich` sibling into a
+`RichDocument` — a `RichNode` tree rooted at `doc`. The vocabulary this
+build recognises mirrors the server's own closed set exactly:
+
+```
+NODES: doc, paragraph, text, heading, bulletList, orderedList,
+       listItem, blockquote, horizontalRule, image
+MARKS: bold, italic, link, strike, underline, code
+```
+
+**An unrecognised node renders its descendant text as a paragraph, never
+nothing.** A future Filament release adding an eleventh node type must not
+make a paragraph vanish — silent content loss is worse than plain-looking
+text, so `RichNode.fromJson` carries an unknown `type` through rather than
+rejecting it, and `RichEntryTile` falls back to `_descendantText` for
+anything its `switch` has no case for. **An image with no `src`** — the
+server nulls it for a private-visibility attachment — is skipped rather
+than rendered broken. **An empty paragraph** (a ProseMirror blank-line
+separator) renders a single space rather than collapsing to zero height, so
+blank lines in the source document stay visible as blank lines. **Marks
+combine**: `strike` and `underline` on the same run — or `strike` on a link,
+which already carries `underline` — both survive, because decorations
+accumulate and are merged once via `TextDecoration.combine` rather than each
+mark overwriting the last. Rendering uses `Text.rich`, not a bare
+`RichText`, specifically so it honours `MediaQuery.textScalerOf(context)`
+like every other tile in this package — a bare `RichText` ignores the
+user's system font-size setting.
+
+### Links need a launcher this package will not take
+
+Opening a URL is a platform concern (`url_launcher` or similar), and this
+package ships **exactly two** runtime dependencies — `flutter` and
+`equatable` — so it takes no opinion on how a host opens one. Tapping a link
+is host-wired exactly like `onSeeAllTap`: the host passes its own
+`EntryRegistry.defaults(onLinkTap: ...)` to `ResourceViewScreen.registry`.
+
+```dart
+ResourceViewScreen(
+  provider: viewProvider,
+  registry: EntryRegistry.defaults(
+    onLinkTap: (href) => launchUrl(Uri.parse(href)), // the host's own package
+  ),
+)
+```
+
+**A host that never wires `onLinkTap` gets a link rendered as plain,
+unstyled text — not a blue underlined span that does nothing when tapped.**
+This is the same absence-not-disabled rule `onSeeAllTap`/`onEditTap` already
+follow, applied to styling rather than to a button: a reader cannot tell an
+unwired link was ever a link, which is the honest state, since this package
+cannot make good on tapping it. `EntryRegistry` is the override point rather
+than a new callback on `ResourceViewScreen` — a host that also wants a
+custom entry type (see `EntryRegistry.register`) wires both through the one
+registry it already owns.
+
+### Known weaknesses, stated now
+
+- **No editing.** The form field for a rich column stays a plain textarea
+  over the raw HTML string — a user reads formatted text and edits markup.
+  A real editor is a much larger build this slice does not attempt.
+- **`attrs.textAlign` is published and ignored.** It belongs to the RTL/i18n
+  slice.
+- **No tables, no custom TipTap blocks.** Outside the closed vocabulary; an
+  unrecognised node type renders its descendant text as a paragraph rather
+  than disappearing, so content survives even where formatting does not.
+
+## Schema caching — cold start renders instantly, revalidates behind it
+
+`/schema` is a ~200 KB document, and until now `PanelProvider.load()` showed
+a spinner for every fetch of it, every launch. Two separate, optional ports
+close that gap — separate for the same reason `FilamentUploadTransport` is:
+`FilamentTransport` is an `abstract interface class`, hosts implement it with
+`implements`, and `implements` inherits no implementation, so adding a member
+to it is a compile error in every existing host.
+
+**Without either port, behaviour is exactly what it is today** — in-memory
+only, a full document fetched every time, no spinner change, no regression.
+This is not a degraded mode; it is the honest no-op.
+
+```dart
+abstract interface class FilamentConditionalTransport {
+  /// GETs [path], sending `If-None-Match: <etag>` when [etag] is non-null.
+  /// A 304 must come back with `notModified: true` — never a throw, and
+  /// never a synthesised empty body.
+  Future<ConditionalResponse> getConditional(String path, {String? etag});
+}
+
+abstract interface class FilamentSchemaCache {
+  Future<CachedSchema?> read(String key);
+  Future<void> write(String key, CachedSchema value);
+  Future<void> clear(String key);
+}
+```
+
+A host that implements neither is untouched. A host that implements
+`FilamentConditionalTransport` alone gets revalidation with no persistence —
+pointless on its own, since there is nothing cached to revalidate against,
+but harmless. The two ports earn their keep together: `FilamentSchemaCache`
+persists the document, `FilamentConditionalTransport` lets a cold start ask
+the server "is my cached copy still good?" for the price of an empty 304
+instead of the whole document.
+
+Here is the example app's `FilamentConditionalTransport`, unedited — the
+same brevity argument as upload's three statements, this time because
+`package:http`'s own `Response` already carries everything needed:
+
+```dart
+@override
+Future<ConditionalResponse> getConditional(String path, {String? etag}) async {
+  // Deliberately not routed through get(): get() throws on every non-2xx,
+  // and a 304 is one — it would arrive there as an indistinguishable
+  // thrown failure instead of the "unchanged" outcome the caller needs.
+  final response = await _client.get(
+    Uri.parse('$baseUrl$path'),
+    headers: {..._headers, if (etag != null) 'If-None-Match': etag},
+  );
+
+  if (response.statusCode == 304) {
+    return ConditionalResponse(
+      notModified: true,
+      etag: response.headers['etag'],
+    );
+  }
+
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw FilamentTransportException(
+      _messageOf(response),
+      statusCode: response.statusCode,
+    );
+  }
+
+  return ConditionalResponse(
+    notModified: false,
+    body: jsonDecode(response.body) as Map<String, dynamic>,
+    etag: response.headers['etag'],
+  );
+}
+```
+
+And a `FilamentSchemaCache`, in-memory for the example — a real host reaches
+for `shared_preferences` or Hive, whatever it already carries; this package
+adds neither as a dependency:
+
+```dart
+class InMemorySchemaCache implements FilamentSchemaCache {
+  final _entries = <String, CachedSchema>{};
+
+  @override
+  Future<CachedSchema?> read(String key) async => _entries[key];
+
+  @override
+  Future<void> write(String key, CachedSchema value) async {
+    _entries[key] = value;
+  }
+
+  @override
+  Future<void> clear(String key) async {
+    _entries.remove(key);
+  }
+}
+```
+
+`CachedSchema.document` is the decoded body, re-encoded — **never the raw
+JSON string, and never the parsed model.** Neither transport port ever
+exposes raw wire bytes; both `get()` and `getConditional()` hand back an
+already-decoded `Map<String, dynamic>`, so there is no original JSON string
+in this package to store. Storing `jsonEncode()` of that same decoded map,
+rather than the parsed `PanelSchema`, is what lets a key this package's
+parser does not yet recognise survive the round trip instead of being
+silently dropped on write.
+
+### The cache key is the host's, and scoping it is a safety property
+
+**`FilamentSchemaCache`'s key is supplied by the host, and the package never
+invents one.** `/schema` is per-user — policies filter which resources
+appear — so a cached document is one user's view of the panel index. **A
+cache key that is not scoped per signed-in user — a constant, or one that
+does not change across a sign-out/sign-in — lets a second user on the same
+device open the first user's cached panel index**, before a single request
+reaches the server. This package cannot enforce the right key: it has no
+identity concept, by design, the same reasoning that keeps login and token
+storage out of scope entirely. Scope the key to something that changes with
+the signed-in user — a user id, a hash of the session token — and clear the
+cache on sign-out if the host does not already rotate the key.
+
+**A host that supplies no key gets no persistence**, which fails safe: the
+same honest no-op as omitting the port entirely, never a cache that silently
+serves the wrong user's data. An empty or whitespace-only key counts as no
+key — `cacheKey: user?.id ?? ''` must never become a shared, unscoped
+persistent key when nobody is signed in.
+
+### Cold start: render cached, revalidate behind it
+
+`PanelProvider.load()` reads the cache first. When there is a usable entry
+it publishes the cached panel immediately — `status` goes straight to
+`success`, never `loading` — and only then revalidates over the network. A
+304 changes nothing; a 200 replaces the panel and rewrites the cache.
+`status = loading` is therefore structurally unreachable once a cache is
+published: no spinner ever flashes over content the user is already looking
+at.
+
+This cache-then-revalidate pass runs on a cold start — a fresh
+`RestResourceDataSource`. Within one data source's lifetime the panel is
+memoized after the first successful load, so a later `load()` on the same
+instance re-publishes that panel without another network revalidation; a
+new data source (a new app launch) starts the cycle again.
+
+**A revalidation failure with a cache already on screen is not a failure
+state.** The panel stays exactly as it was, and the user is never shown an
+error for a background request they never made — a stale panel is bounded:
+`/schema` describes structure, and every read and write still hits the
+server, which re-derives permissions on every request. A cached panel cannot
+grant access the server will not. A *cold* failure with no cache behaves
+exactly as it does without either port: `PanelFailure`.
+
+**Two outcomes still surface even with a cache on screen**, because both
+name a state the user has to act on, not a fact about staleness:
+
+- A **401** during revalidation still sets `isUnauthenticated` and
+  `status = failure` — a signed-out session must not keep showing a panel,
+  cached or not.
+- A cached document of a **newer, unsupported schema version** is discarded
+  and refetched, never rendered — `PanelSchema.fromJson` already throws
+  `UnsupportedSchemaVersionException` for one, and stale bytes must never be
+  the reason `needsAppUpdate` fails to surface.
+
+The screens gate `isUnauthenticated` behind `status.isFailure`.
+`needsAppUpdate` is a provider-level flag the host consumes — no screen
+reads it — and setting it forces `status = failure`, so neither state can
+be masked by a stale panel sitting in `success`.
+
+### Known weaknesses, stated now
+
+- **A 304 does not save server CPU** — see the Laravel README's Schema
+  caching section; the document is still built to hash it.
+- **The panel can be one revalidation stale.** Bounded by the reasoning
+  above: structure only, and the server re-derives every permission on
+  every request regardless of what `/schema` last said.
+- **Cache correctness depends entirely on the host's key.** A host that keys
+  the cache badly — a constant, say — can show one user another's panel
+  index. The package cannot detect this; it is documented as the host's
+  obligation, in the same class as "the host owns auth."
+- **No eviction.** One document per key, overwritten in place; a host that
+  creates unbounded keys grows unbounded storage.
+
+## Dashboard — stats render, charts are the host's
+
+`DashboardProvider` + `DashboardScreen` follow the same provider/screen
+shape as every other read screen: `LoadStatus`, skeleton-first loading,
+pull-to-refresh, `PanelUnauthenticated` on a 401. `DashboardProvider.load()`
+calls `ResourceDataSource.dashboard()`, which parses `GET /dashboard` into a
+`DashboardData` — a list of `DashboardWidgetData`, sealed into
+`StatsWidgetData` (a row of `StatData` cards) and `ChartWidgetData` (a
+labelled axis and one or more `ChartDataset`s), so a `switch` over a widget
+is exhaustive. Values are live on every read — the panel has no static
+dashboard document to cache — so pull-to-refresh genuinely re-runs the
+panel's queries, not a cached replay. A successful load of zero widgets
+renders `PanelEmpty` with the new `dashboardEmpty` string, not a blank
+screen.
+
+**Stat cards render fully, including the sparkline.** `StatData.chart` (a
+`List<double>?`) draws through `StatSparkline`, a hand-rolled
+`CustomPainter` — a polyline with no axes, labels or touch handling. Its
+colour comes from `SemanticBadge.colorFor()`, the same semantic vocabulary
+(`success`, `danger`, …) action buttons already use; there is no second
+palette to configure.
+
+**Charts are published, not drawn — read this before assuming the package
+can't do charts.** `ChartWidgetData` carries parsed `labels` and
+`ChartDataset`s, but this package draws none of it itself. That is not a
+missing feature; it is what keeps the two-dependency promise from the
+Requirements section above (`flutter` + `equatable`, nothing else) true for
+every host, including the ones with no dashboard. `DashboardScreen` takes
+an optional `chartBuilder`:
+
+```dart
+typedef DashboardChartBuilder =
+    Widget Function(BuildContext context, ChartWidgetData data);
+```
+
+A host that wants charts renders them with whatever charting package it
+already has, in about ten lines — `fl_chart` here:
+
+```dart
+DashboardScreen(
+  provider: dashboardProvider,
+  chartBuilder: (context, data) => LineChart(
+    LineChartData(
+      lineBarsData: [
+        for (final series in data.datasets)
+          LineChartBarData(spots: [
+            for (var i = 0; i < series.data.length; i++)
+              FlSpot(i.toDouble(), series.data[i]),
+          ]),
+      ],
+    ),
+  ),
+)
+```
+
+**Without a `chartBuilder`, a chart card renders its heading and the new
+`chartUnavailable` string** ("No chart renderer supplied.") — never a blank
+box. This is the same honest-empty-state rule every other screen in this
+package follows: a widget the client cannot render says so, rather than
+pretending nothing was there.
+
+Two known weaknesses carried over from the server, worth knowing before you
+build against this screen:
+
+- **`StatData.value` is a string, and only a string.** The server
+  stringifies `Stat::getValue()` once because only the panel's own
+  formatting knows whether `"1,340"` should have been `1340` or `1.3k`. You
+  cannot do arithmetic on it — a "trend arrow computed on device" feature
+  would need the server to publish a second, numeric field, which it does
+  not today.
+- **No polling or realtime.** The dashboard is exactly as fresh as the last
+  `load()`/pull-to-refresh; there is no timer built into `DashboardProvider`
+  and none is planned for this screen.
+
+## RTL and i18n — the panel decides, not the device
+
+Every screen this package ships — `PanelIndexScreen`, `ResourceListScreen`,
+`ResourceFormScreen`, `ResourceViewScreen`, `RelationListScreen`,
+`DashboardScreen` — wraps its own returned widget (the `Scaffold` included,
+so the app bar's title alignment and back-button side follow too) in a
+`Directionality` resolved from the panel's published `direction`,
+**unconditionally, not as a host opt-in**. There is no wiring to do and no
+flag to set: a panel whose locale is Arabic renders right-to-left the
+moment `/schema` says so, whatever direction the host's own `MaterialApp`
+happens to be.
+
+That "unconditionally" is deliberate, not an oversight. Publishing a
+capability and leaving the host to wire it has shipped **dead** twice
+already in this project — P6d's `fetchRelation`, P6e's `onLinkTap` — each
+time caught only in review, because nothing exercises an unwired path until
+someone reads specifically for it. Direction is correctness here, not
+preference: Arabic labels laid out left-to-right is not a taste a host
+might reasonably want to keep. A host whose own app is already RTL sees no
+change; a host embedding an Arabic panel inside an LTR app gets the right
+answer instead of the wrong one, with nothing to configure.
+
+`ResourceSchema.direction` (and `RelationDescriptor.direction`) are
+populated by `PanelSchema.fromJson` at parse time, propagated down from the
+one `panel.direction` value into every resource and relation the document
+carries. All six screens read direction off data the host already passes
+them — not a second value the host would have to thread through — which is
+the property that keeps this from being a third capability that ships
+published and unwired. A directly-constructed `ResourceSchema`, as in a
+test, defaults to `PanelDirection.ltr`.
+
+**Overlay routes get the same wrap, deliberately, not by inheritance.** A
+sheet, dialog, picker or dropdown menu pushed from a screen does not
+automatically pick up that screen's `Directionality` — `Navigator` mounts a
+route's content above the pushing screen in the widget tree, not below it, so
+`Directionality` is exactly as invisible to it as any other ordinary
+`InheritedWidget` would be outside its subtree. Every route this package
+pushes re-wraps itself in the direction resolved from the schema, and each one
+has its own test in `rtl_layout_test.dart` asserting the resolved direction at
+a widget inside the route — deleting any single wrap reds a named test:
+
+| route | how it re-wraps |
+|---|---|
+| the list screen's sort sheet | `showModalBottomSheet` `builder:` |
+| the record screen's delete confirmation | `showDialog` `builder:` |
+| a record action's confirmation | `showDialog` `builder:` |
+| a date field's `showDatePicker` | the picker's own `builder:` |
+| a datetime field's `showTimePicker` | the picker's own `builder:` |
+| a remote select's search sheet | `showModalBottomSheet` `builder:` |
+| a select field's dropdown menu | per `DropdownMenuItem`, since `DropdownButtonFormField` has no `builder:` |
+
+A `SnackBar` is deliberately **not** in that list, and the distinction is
+worth stating because it is easy to get backwards: a snack bar is not a route.
+`ScaffoldMessenger` hands it to the nearest registered `Scaffold`, which
+renders it inside its own subtree — already below the screen's wrap — so it
+inherits the panel's direction with no help. A wrap was written here anyway,
+and measurement showed it was dead code; it was removed rather than left as
+untested decoration. The rendered snack bar's direction is asserted directly,
+so the day that stops being true, a test says so.
+
+**`textAlign` is finally honoured**, closing the gap P6e's rich text left
+open: a `paragraph` or `heading` node renders with the `textAlign` its own
+`attrs` carries — `start`/`center`/`end`/`justify`, the server's closed
+vocabulary — instead of the value being published and ignored.
+
+**Grouped digit runs are bidi-isolated under RTL**, so a phone number or a
+spaced IBAN keeps its own group order inside an Arabic sentence instead of
+the bidi algorithm reordering the groups themselves. Measured, not assumed:
+a phone number embedded in Arabic prose renders with its digit groups
+swapped end-for-end under plain RTL layout, and correctly once wrapped in a
+directional isolate (`isolateGroupedDigits`, `lib/ui/bidi_text.dart`). The
+pattern it matches is deliberately tight — **two or more digit groups
+separated by spaces or hyphens, with an optional leading `+`** — which
+catches a phone number, a spaced IBAN, a hyphenated tax number, and
+excludes a year, a price (`19.99`; `.` is not a listed separator) or a
+plain count, none of which the bidi algorithm reorders internally and none
+of which an isolate would fix. A digit is ASCII, Arabic-Indic (`٠`–`٩`,
+U+0660–0669) or Extended Arabic-Indic (`۰`–`۹`, U+06F0–06F9): Dart's `\d` is
+ASCII-only, and the eastern forms — the numerals an `ar` panel is most likely
+to actually contain — reverse with exactly the same measured signature, so
+they are matched explicitly.
+
+There is **one implementation, applied at every place this package renders a
+server-supplied string** — five call sites, each with its own test asserting
+measured glyph order:
+
+| site | what it covers |
+|---|---|
+| `entries/entry_widgets.dart` (`EntryTile`) | an infolist text entry |
+| `semantic_badge.dart` | a badge's label, isolated *after* the colour lookup so the lookup key stays raw |
+| `resource_card.dart` (`_text`) | a card's title, subtitle and meta |
+| `entries/rich_entry_tile.dart` (`_span`, `_blockNode`) | every rich-text run, plus the two unknown-node fallbacks |
+| `dashboard_screen.dart` | a stat tile's value and description |
+
+The implementation is single; the *application* is not, and the difference
+matters: a new widget rendering server text has to call the helper, and only a
+test at that widget proves it does. The whole-branch review found three of
+these five call sites deletable with the entire suite still green — that gap
+is what the per-site tests above close.
+
+**This is a heuristic, not a semantic parse — say so plainly.** A free-text
+value that happens to be shaped like grouped digits gets isolated too,
+whether or not it is actually a phone number. Harmless, since isolation is
+the correct rendering for a run shaped like that regardless of what it
+means — but it is a guess, and should be treated as one rather than as
+proof this package understood the data.
+
+Known weaknesses, stated now:
+
+- **Per-field content direction is not modelled.** Direction follows the
+  panel, not the value — a panel whose locale is English but whose data
+  happens to be Arabic still lays out left-to-right, because the server has
+  no per-value answer to give.
+- **Text a host renders itself is not covered.** The isolate runs only
+  where this package renders a server-supplied string; a host drawing its
+  own widget from the same payload gets the raw, un-isolated string.
+- **This package's own `FilamentStrings` are not translated.** They are
+  host-supplied with English defaults by design (see Wiring, above) — a
+  host serving an Arabic panel supplies Arabic strings itself.
+- **Translatable-field editing is untouched.** A `caption.ar` key still
+  arrives as a flat sibling beside `caption`, exactly as it always has;
+  this slice never touches per-locale field editing.
+- **The isolate helper's idempotency guard is whole-string, not
+  per-match.** A value that concatenated an already-isolated fragment with
+  a fresh, un-isolated run would have the fresh run skipped too — see the
+  `ponytail:` comment on `isolateGroupedDigits` for the narrow case this
+  leaves unhandled and why a per-match version was tried and reverted.
+- **`RichEntryTile` isolates per mark leaf, not per node.** A grouped-digit
+  run that a bold boundary splits down the middle — its first group bold,
+  the rest plain — arrives as two separate leaves, and neither alone
+  matches the pattern, so neither is isolated.
+- **The pattern has a leading token boundary but deliberately no trailing
+  one.** `(?<!\w)` stops a word ending in a digit from donating its last
+  character to the run, so `line1 10 20` isolates `10 20`. There is no
+  matching `(?!\w)`, and the asymmetry is measured rather than lazy: a raw
+  ISO timestamp still isolates only its date half (`2026-03-24` out of
+  `2026-03-24T08:41:19Z`), which changes the relative order of nothing and
+  is harmless — while a trailing guard makes it strictly worse, backtracking
+  from `2026-03-24` (rejected, `T` follows) to `2026-03` (accepted, `-` is
+  not `\w`) and splitting the date itself. Note `\w` is ASCII-only, as `\d`
+  was: an Arabic word ending in an eastern numeral is not guarded.
+
+**A note for anyone extending a screen in this package**, hard-won across
+three separate fixes in this slice: a `State`'s own `context` — read
+outside `build()`, e.g. in a method that opens a dialog, a bottom sheet or
+a picker — is an **ancestor** of the `Directionality` that same widget's
+`build()` wraps around its returned tree, not a descendant of it. Calling
+`Directionality.of(context)` from such a method reads the *host's* ambient
+direction, silently ignoring the wrap `build()` installs one line away.
+Resolve from the schema value instead, via `textDirectionOf(...)`
+(`lib/ui/material_panel_state_builder.dart`), whenever the call site is not
+itself inside `build(BuildContext)`.

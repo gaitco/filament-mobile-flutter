@@ -27,6 +27,10 @@ class ResourceListProvider extends ChangeNotifier {
   bool _isUnauthenticated = false;
   bool _hasMore = false;
   bool _isLoadingMore = false;
+
+  /// True right after the most recent `loadMore()` call failed — see that
+  /// method's doc. Reset by every fresh fetch, never left stuck.
+  bool _loadMoreFailed = false;
   int _page = 1;
   String _searchTerm = '';
   ResourceSort? _activeSort;
@@ -45,6 +49,7 @@ class ResourceListProvider extends ChangeNotifier {
   bool get isUnauthenticated => _isUnauthenticated;
   bool get hasMore => _hasMore;
   bool get isLoadingMore => _isLoadingMore;
+  bool get loadMoreFailed => _loadMoreFailed;
   String get searchTerm => _searchTerm;
   ResourceSort? get activeSort => _activeSort;
 
@@ -71,6 +76,7 @@ class ResourceListProvider extends ChangeNotifier {
     // A page-two fetch may still be in flight; it will drop its own result,
     // and clearing the flag here is what releases loadMore() again.
     _isLoadingMore = false;
+    _loadMoreFailed = false;
     // Skeleton geometry: the screen renders fake cards while loading, so the
     // real records must not linger underneath and then jump.
     _records = const [];
@@ -106,13 +112,23 @@ class ResourceListProvider extends ChangeNotifier {
 
   /// Appends the next page. A failure here keeps whatever is already on
   /// screen — losing a scrolled list because page four timed out is worse
-  /// than the missing page.
+  /// than the missing page — but [loadMoreFailed] still flips, so the
+  /// trailing row can show a retry instead of a spinner that never resolves
+  /// into anything the user is told about.
+  ///
+  /// A 401 is the exception, and it is why [isUnauthenticated] is set here
+  /// too: the session is gone, so every retry the trailing row offers will
+  /// fail the same way, and the screen has to be told to route to the
+  /// unauthenticated state rather than show a generic retry forever. Keeping
+  /// the rows is right for a timeout and wrong for a signed-out user.
   Future<void> loadMore() async {
     if (!_hasMore || _isLoadingMore || _status.isLoading) return;
 
     final requestId = ++_requestId;
 
     _isLoadingMore = true;
+    _loadMoreFailed = false;
+    _errorMessage = null;
     notifyListeners();
 
     try {
@@ -135,6 +151,12 @@ class ResourceListProvider extends ChangeNotifier {
       if (requestId != _requestId) return;
 
       _errorMessage = messageOf(e);
+      _loadMoreFailed = true;
+
+      if (e is FilamentTransportException && e.statusCode == 401) {
+        _isUnauthenticated = true;
+        _status = LoadStatus.failure;
+      }
     }
 
     _isLoadingMore = false;

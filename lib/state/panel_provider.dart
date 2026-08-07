@@ -33,7 +33,27 @@ class PanelProvider extends ChangeNotifier {
   bool get isUnauthenticated => _isUnauthenticated;
 
   Future<void> load() async {
-    _status = LoadStatus.loading;
+    // Cold-start fast path: a cached panel (Task 4's cachedPanel(), which
+    // never touches the network and never throws) is published immediately
+    // so the user sees the panel instead of a spinner over a ~200 KB fetch.
+    // No cache means today's behaviour: a loading state while panel() runs.
+    PanelSchema? cached;
+    try {
+      cached = await _source.cachedPanel();
+    } catch (_) {
+      // The interface mandates null-on-no-cache and the in-package
+      // implementation never throws, but a third-party ResourceDataSource
+      // might. A broken cache read degrades to "no cache" — load() never
+      // threw before this call existed, and must not start now.
+    }
+    final hadCache = cached != null;
+
+    if (hadCache) {
+      _panel = cached;
+      _status = LoadStatus.success;
+    } else {
+      _status = LoadStatus.loading;
+    }
     _errorMessage = null;
     _needsAppUpdate = false;
     _isUnauthenticated = false;
@@ -43,15 +63,31 @@ class PanelProvider extends ChangeNotifier {
       _panel = await _source.panel();
       _status = LoadStatus.success;
     } on UnsupportedSchemaVersionException catch (e) {
+      // Always surfaces, cache or not: a cached document only ever holds an
+      // older, valid schema, and this branch does not touch it — there is
+      // nothing wrong with the cache to clear. But a too-new server response
+      // means the user must update the app, and a stale panel rendered on
+      // top of that fact would hide it more convincingly than showing
+      // nothing at all — the same reasoning the class doc gives for not
+      // half-rendering an unparseable panel.
       _needsAppUpdate = true;
       _errorMessage = messageOf(e);
       _status = LoadStatus.failure;
     } catch (e) {
-      if (e is FilamentTransportException && e.statusCode == 401) {
+      final unauthenticated =
+          e is FilamentTransportException && e.statusCode == 401;
+      if (unauthenticated) {
+        // Unlike other revalidation failures, a 401 always ends in failure:
+        // a signed-out session must not keep showing a panel, even a cached
+        // one, and the screens only look at isUnauthenticated once
+        // status.isFailure is true.
         _isUnauthenticated = true;
+        _errorMessage = messageOf(e);
+        _status = LoadStatus.failure;
+      } else if (!hadCache) {
+        _errorMessage = messageOf(e);
+        _status = LoadStatus.failure;
       }
-      _errorMessage = messageOf(e);
-      _status = LoadStatus.failure;
     }
 
     notifyListeners();

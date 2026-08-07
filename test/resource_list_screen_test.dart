@@ -1,7 +1,10 @@
+import 'package:filament_mobile/dashboard/dashboard_data.dart';
 import 'package:filament_mobile/data/paginated_records.dart';
 import 'package:filament_mobile/data/action_result.dart';
 import 'package:filament_mobile/data/resource_data_source.dart';
+import 'package:filament_mobile/schema/relation_descriptor.dart';
 import 'package:filament_mobile/data/resource_record.dart';
+import 'package:filament_mobile/data/upload_result.dart';
 import 'package:filament_mobile/data/write_result.dart';
 import 'package:filament_mobile/ports/filament_strings.dart';
 import 'package:filament_mobile/ports/filament_transport.dart';
@@ -16,12 +19,33 @@ import 'package:filament_mobile/data/options_page.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _Source implements ResourceDataSource {
-  _Source({this.error, this.rows = 2});
+  _Source({this.error, this.rows = 2, this.pages = 1, this.failPage});
 
   final Object? error;
   final int rows;
+
+  /// How many pages the resource has. Left at 1, `hasMore` is false and
+  /// `loadMore()` returns immediately — which is why every pagination
+  /// assertion needs this set, and why one that forgets it passes against
+  /// nothing.
+  final int pages;
+
+  /// The page number to fail on, page 1 still succeeding: a `loadMore()`
+  /// failure over rows already on screen, which is the only state that
+  /// renders the retry row.
+  final int? failPage;
+
   int listCalls = 0;
   String? lastSearch;
+  final List<int> requestedPages = [];
+
+  @override
+  Future<PaginatedRecords> relation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation, {
+    int page = 1,
+  }) async => throw UnimplementedError();
 
   @override
   Future<PaginatedRecords> list(
@@ -33,19 +57,33 @@ class _Source implements ResourceDataSource {
   }) async {
     listCalls++;
     lastSearch = search;
+    requestedPages.add(page);
     if (error != null) throw error!;
+    if (page == failPage) throw Exception('تعذّر تحميل الصفحة $page');
+
+    // Distinct rows per page: a paging assertion against one page repeated
+    // proves nothing about paging.
+    final offset = (page - 1) * rows;
 
     return PaginatedRecords(
       records: [
-        for (var i = 0; i < rows; i++)
+        for (var i = offset; i < offset + rows; i++)
           ResourceRecord.fromJson({'id': i, 'name': 'صف $i'}, 'id'),
       ],
-      meta: PageMeta(currentPage: page, lastPage: 1, perPage: 20, total: rows),
+      meta: PageMeta(
+        currentPage: page,
+        lastPage: pages,
+        perPage: 20,
+        total: rows * pages,
+      ),
     );
   }
 
   @override
   Future<PanelSchema> panel() async => throw UnimplementedError();
+
+  @override
+  Future<PanelSchema?> cachedPanel() async => null;
 
   @override
   Future<ResourceRecord> record(String resourceKey, Object id) async =>
@@ -92,6 +130,17 @@ class _Source implements ResourceDataSource {
     Object? recordId,
     required Map<String, dynamic> values,
     required String changed,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<DashboardData> dashboard() => throw UnimplementedError();
+
+  @override
+  Future<UploadResult> uploadFile(
+    String resourceKey,
+    String field, {
+    required List<int> bytes,
+    required String filename,
   }) => throw UnimplementedError();
 }
 
@@ -269,6 +318,56 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tapped!.id, 0);
+  });
+
+  // The two tests below cover what a whole-branch mutation run found
+  // uncovered: mutating this screen's scroll threshold (`* 0.8` → `* 1.5`)
+  // and its `loadMoreFailed:` wiring (→ `false`) left all 538 tests green,
+  // while the identical scroll mutation on the newer `RelationListScreen`
+  // reds one. The older, more-used path had no pagination coverage at all.
+  testWidgets('paginates when the list is scrolled near the bottom', (
+    tester,
+  ) async {
+    // 20 rows so page 1 alone overflows the test viewport — a test dragging
+    // a two-row list drags nothing and proves nothing.
+    final source = _Source(rows: 20, pages: 2);
+
+    await tester.pumpWidget(screenFor(source));
+    await tester.pumpAndSettle();
+
+    expect(source.requestedPages, [1]);
+    expect(find.text('صف 20'), findsNothing);
+
+    await tester.drag(find.byType(ListView), const Offset(0, -4000));
+    await tester.pumpAndSettle();
+
+    expect(source.requestedPages, [1, 2]);
+    expect(find.text('صف 20'), findsOneWidget);
+  });
+
+  testWidgets('offers a retry when the next page fails, keeping page one', (
+    tester,
+  ) async {
+    // The affordance `PaginatedCardList` added, asserted through THIS
+    // screen — the widget's own test proves it renders when told to, not
+    // that this screen tells it to.
+    final source = _Source(rows: 20, pages: 2, failPage: 2);
+
+    await tester.pumpWidget(screenFor(source));
+    await tester.pumpAndSettle();
+
+    await tester.drag(find.byType(ListView), const Offset(0, -4000));
+    await tester.pumpAndSettle();
+
+    expect(source.requestedPages, [1, 2]);
+    expect(find.byKey(const ValueKey('loadMore.failed')), findsOneWidget);
+    // The server's own message, not a generic one — the failure used to set
+    // an errorMessage nothing ever read.
+    expect(find.textContaining('تعذّر تحميل الصفحة 2'), findsOneWidget);
+
+    // Page one survives the failure: losing a scrolled list because page two
+    // timed out is worse than the missing page.
+    expect(find.byType(ResourceCard), findsWidgets);
   });
 
   testWidgets('renders in RTL without overflow', (tester) async {

@@ -1,5 +1,9 @@
+import '../dashboard/dashboard_data.dart';
+import '../ports/filament_schema_cache.dart';
 import '../ports/filament_transport.dart';
+import '../ports/filament_upload_transport.dart';
 import '../schema/panel_schema.dart';
+import '../schema/relation_descriptor.dart';
 import '../schema/resource_schema.dart';
 import '../schema/schema_component.dart';
 import 'action_result.dart';
@@ -7,19 +11,42 @@ import 'options_page.dart';
 import 'paginated_records.dart';
 import 'resource_data_source.dart';
 import 'resource_record.dart';
+import 'schema_cache_store.dart';
+import 'upload_result.dart';
 import 'write_result.dart';
 
 /// Talks to `gait/filament-mobile` over a host-supplied [FilamentTransport].
 ///
-/// Caches the panel document, because every list and record call needs its
-/// resource's `recordKey` and the document changes far less often than a list
-/// is scrolled.
+/// Caches the panel document in memory for the life of this instance,
+/// because every list and record call needs its resource's `recordKey` and
+/// the document changes far less often than a list is scrolled. Optionally
+/// also persists it across restarts and revalidates it with a conditional
+/// GET — see [cache] and [cacheKey] — through a [SchemaCacheStore].
 class RestResourceDataSource implements ResourceDataSource {
   RestResourceDataSource({
     required FilamentTransport transport,
     String prefix = '/api/mobile-panel',
+    FilamentSchemaCache? cache,
+    String? cacheKey,
+  }) : this._(
+         transport: transport,
+         prefix: _normalisePrefix(prefix),
+         cache: cache,
+         cacheKey: cacheKey,
+       );
+
+  RestResourceDataSource._({
+    required FilamentTransport transport,
+    required this.prefix,
+    FilamentSchemaCache? cache,
+    String? cacheKey,
   }) : _transport = transport,
-       prefix = _normalisePrefix(prefix);
+       _schemaCache = SchemaCacheStore(
+         transport: transport,
+         path: '$prefix/schema',
+         cache: cache,
+         cacheKey: cacheKey,
+       );
 
   /// Exactly one leading slash, no trailing one — unless the host handed us a
   /// whole URL, which is passed through with only its trailing slash removed.
@@ -46,15 +73,15 @@ class RestResourceDataSource implements ResourceDataSource {
 
   final FilamentTransport _transport;
   final String prefix;
+  final SchemaCacheStore _schemaCache;
 
   PanelSchema? _panel;
 
   @override
-  Future<PanelSchema> panel() async {
-    return _panel ??= PanelSchema.fromJson(
-      await _transport.get('$prefix/schema'),
-    );
-  }
+  Future<PanelSchema> panel() async => _panel ??= await _schemaCache.panel();
+
+  @override
+  Future<PanelSchema?> cachedPanel() => _schemaCache.cachedPanel();
 
   @override
   Future<PaginatedRecords> list(
@@ -113,6 +140,37 @@ class RestResourceDataSource implements ResourceDataSource {
       resource.recordKey,
       permissions: permissions is Map<String, dynamic> ? permissions : null,
       actions: actions is List ? actions : null,
+    );
+  }
+
+  /// One relation manager's rows for record [id] — the same envelope [list]
+  /// parses, against the sibling URL `RelationController` serves. Unlike
+  /// [list], the child rows' own key comes from [relation] itself
+  /// (`relation.recordKey`), not from this resource's schema: the related
+  /// model is routinely a different one, with a different route key.
+  @override
+  Future<PaginatedRecords> relation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation, {
+    int page = 1,
+  }) async {
+    final response = await _transport.get(
+      '$prefix/$resourceKey/$id/relations/${relation.key}',
+      query: {'page': '$page'},
+    );
+
+    final rows = response['data'];
+    final meta = response['meta'];
+
+    return PaginatedRecords(
+      records: [
+        if (rows is List)
+          for (final row in rows)
+            if (row is Map<String, dynamic>)
+              ResourceRecord.fromJson(row, relation.recordKey),
+      ],
+      meta: PageMeta.fromJson(meta is Map<String, dynamic> ? meta : const {}),
     );
   }
 
@@ -246,6 +304,65 @@ class RestResourceDataSource implements ResourceDataSource {
       ],
       hasMore: response.body['hasMore'] == true,
     );
+  }
+
+  @override
+  Future<DashboardData> dashboard() async =>
+      DashboardData.fromJson(await _transport.get('$prefix/dashboard'));
+
+  @override
+  Future<UploadResult> uploadFile(
+    String resourceKey,
+    String field, {
+    required List<int> bytes,
+    required String filename,
+  }) async {
+    // Capability is detected, not assumed: a host that never implemented
+    // the optional upload port gets an actionable message, not a crash or
+    // a silent no-op — this is also the signal Task 6's form field reads
+    // to stay read-only.
+    //
+    // `FilamentUploadTransport` is a sibling interface, not a subtype of
+    // `FilamentTransport`, so Dart cannot promote `_transport` from the
+    // `is!` check below — the explicit cast is required, not decorative.
+    if (_transport is! FilamentUploadTransport) {
+      return const UploadFailed(
+        'This host transport does not implement FilamentUploadTransport, '
+        'so files cannot be uploaded. Implement it alongside '
+        'FilamentTransport to enable this field.',
+      );
+    }
+    final transport = _transport as FilamentUploadTransport;
+
+    try {
+      final response = await transport.upload(
+        '$prefix/$resourceKey/upload',
+        bytes: bytes,
+        filename: filename,
+        field: field,
+      );
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final path = response.body['path'];
+        return path is String
+            ? UploadSuccess(path)
+            : UploadFailed(
+                'Upload succeeded but the server sent no path.',
+                statusCode: response.statusCode,
+              );
+      }
+
+      final message = response.body['message'];
+      return UploadFailed(
+        message is String ? message : null,
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      // Same contract as create/update/destroy: the transport throws on
+      // socket/DNS/timeout, and an offline upload must come back as a
+      // failed result, never an unhandled async error.
+      return UploadFailed(messageOf(e));
+    }
   }
 
   WriteResult _interpret(FilamentResponse response) {

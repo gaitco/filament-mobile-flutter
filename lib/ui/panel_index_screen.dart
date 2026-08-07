@@ -52,9 +52,12 @@ class _PanelIndexScreenState extends State<PanelIndexScreen> {
 
     return ListenableBuilder(
       listenable: widget.provider,
-      builder: (context, _) => Scaffold(
-        appBar: AppBar(title: Text(widget.provider.panel?.title ?? '')),
-        body: builder(context, _state()),
+      builder: (context, _) => withPanelDirection(
+        widget.provider.panel?.direction ?? PanelDirection.ltr,
+        Scaffold(
+          appBar: AppBar(title: Text(widget.provider.panel?.title ?? '')),
+          body: builder(context, _state()),
+        ),
       ),
     );
   }

@@ -1,7 +1,10 @@
+import 'package:filament_mobile/dashboard/dashboard_data.dart';
 import 'package:filament_mobile/data/paginated_records.dart';
 import 'package:filament_mobile/data/action_result.dart';
 import 'package:filament_mobile/data/resource_data_source.dart';
+import 'package:filament_mobile/schema/relation_descriptor.dart';
 import 'package:filament_mobile/data/resource_record.dart';
+import 'package:filament_mobile/data/upload_result.dart';
 import 'package:filament_mobile/data/write_result.dart';
 import 'package:filament_mobile/schema/panel_schema.dart';
 import 'package:filament_mobile/schema/resource_schema.dart';
@@ -23,6 +26,14 @@ class _Source implements ResourceDataSource {
   _Source({this.recordPermissions = const {}});
 
   final Map<String, dynamic> recordPermissions;
+
+  @override
+  Future<PaginatedRecords> relation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation, {
+    int page = 1,
+  }) async => throw UnimplementedError();
 
   @override
   Future<PaginatedRecords> list(
@@ -48,6 +59,9 @@ class _Source implements ResourceDataSource {
 
   @override
   Future<PanelSchema> panel() async => throw UnimplementedError();
+
+  @override
+  Future<PanelSchema?> cachedPanel() async => null;
 
   @override
   Future<WriteResult> create(String resourceKey, Map<String, dynamic> values) =>
@@ -87,6 +101,17 @@ class _Source implements ResourceDataSource {
     required Map<String, dynamic> values,
     required String changed,
   }) => throw UnimplementedError();
+
+  @override
+  Future<DashboardData> dashboard() => throw UnimplementedError();
+
+  @override
+  Future<UploadResult> uploadFile(
+    String resourceKey,
+    String field, {
+    required List<int> bytes,
+    required String filename,
+  }) => throw UnimplementedError();
 }
 
 /// [permissions] is the resource-level block ("this resource supports
@@ -110,6 +135,9 @@ ResourceSchema _resourceWith(Map<String, bool> permissions) =>
 Widget listHarness({Map<String, bool> permissions = const {}}) {
   return MaterialApp(
     home: ResourceListScreen(
+      // Wired, so this suite tests the PERMISSION gate specifically — the
+      // wiring gate (`onCreateTap != null`) has its own test further down.
+      onCreateTap: () {},
       provider: ResourceListProvider(
         source: _Source(),
         resource: _resourceWith(permissions),
@@ -124,6 +152,9 @@ Widget viewHarness({
 }) {
   return MaterialApp(
     home: ResourceViewScreen(
+      // Wired, so this suite tests the PERMISSION gate specifically — the
+      // wiring gate (`onEditTap != null`) has its own test further down.
+      onEditTap: (_) {},
       provider: ResourceViewProvider(
         source: _Source(recordPermissions: recordPermissions),
         resource: _resourceWith(resourcePermissions),
@@ -178,4 +209,46 @@ void main() {
 
     expect(find.byKey(const ValueKey('record.edit')), findsOneWidget);
   });
+
+  // The wiring gate, sibling to the permission gate above: absence means
+  // unavailable, so a host that never wired the callback must get no button
+  // at all — never one that renders enabled and silently no-ops on tap.
+  testWidgets(
+    'no create button when the resource permits it but onCreateTap is unwired',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ResourceListScreen(
+            provider: ResourceListProvider(
+              source: _Source(),
+              resource: _resourceWith({'create': true}),
+            ),
+          ),
+        ),
+      );
+      await pumpUntilFound(tester, find.byType(ListView));
+
+      expect(find.byKey(const ValueKey('resource.create')), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'no edit affordance when the record permits it but onEditTap is unwired',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ResourceViewScreen(
+            provider: ResourceViewProvider(
+              source: _Source(recordPermissions: {'update': true}),
+              resource: _resourceWith({'update': true}),
+              id: 1,
+            ),
+          ),
+        ),
+      );
+      await pumpUntilFound(tester, find.text('صف'));
+
+      expect(find.byKey(const ValueKey('record.edit')), findsNothing);
+    },
+  );
 }

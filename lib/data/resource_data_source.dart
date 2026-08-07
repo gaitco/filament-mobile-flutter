@@ -1,9 +1,12 @@
+import '../dashboard/dashboard_data.dart';
 import '../schema/panel_schema.dart';
+import '../schema/relation_descriptor.dart';
 import 'action_result.dart';
 import 'options_page.dart';
 import '../schema/schema_component.dart';
 import 'paginated_records.dart';
 import 'resource_record.dart';
+import 'upload_result.dart';
 import 'write_result.dart';
 
 /// Everything the screens need from the server.
@@ -13,6 +16,15 @@ import 'write_result.dart';
 abstract interface class ResourceDataSource {
   /// GET /schema
   Future<PanelSchema> panel();
+
+  /// The cached panel, if there is a usable one — parsed, never rendered
+  /// from bytes this build cannot read.
+  ///
+  /// Never touches the network: a cache hit or miss is a storage question,
+  /// not a server one. A cold start calls this first to paint immediately,
+  /// then calls [panel] as usual to revalidate behind it. Implementations
+  /// with no cache configured return `null` unconditionally.
+  Future<PanelSchema?> cachedPanel();
 
   /// GET /{resource}
   Future<PaginatedRecords> list(
@@ -25,6 +37,17 @@ abstract interface class ResourceDataSource {
 
   /// GET /{resource}/{id} — the only call that returns per-record permissions.
   Future<ResourceRecord> record(String resourceKey, Object id);
+
+  /// GET /{resource}/{id}/relations/{relation} — one relation manager's child
+  /// rows, in the same `{data, meta}` envelope [list] uses. The same read
+  /// path as [list] against a sibling URL, so it is fetched the same way:
+  /// through this data source, never a closure a host has to hand-wire.
+  Future<PaginatedRecords> relation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation, {
+    int page,
+  });
 
   /// POST /{resource} — never throws on a 4xx; see [WriteResult].
   Future<WriteResult> create(String resourceKey, Map<String, dynamic> values);
@@ -70,5 +93,27 @@ abstract interface class ResourceDataSource {
     Object? recordId,
     required Map<String, dynamic> values,
     required String changed,
+  });
+
+  /// GET /dashboard — the panel's widgets, values already computed.
+  ///
+  /// Values are live: they are not cached the way [panel] is, and a re-read
+  /// re-runs the panel's own queries, so pull-to-refresh always shows the
+  /// current numbers rather than a stale snapshot.
+  Future<DashboardData> dashboard();
+
+  /// POST /{resource}/upload — uploads a file for a single-file upload
+  /// field. [field] is the field's statePath, so a nested field is
+  /// addressable.
+  ///
+  /// Fails with [UploadFailed] rather than throwing, including when the
+  /// host's transport has not implemented the optional
+  /// `FilamentUploadTransport` port — the same never-throw contract every
+  /// other write has.
+  Future<UploadResult> uploadFile(
+    String resourceKey,
+    String field, {
+    required List<int> bytes,
+    required String filename,
   });
 }

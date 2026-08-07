@@ -3,9 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../data/options_page.dart';
+import '../../ports/filament_file_picker.dart';
+import '../../ports/filament_strings.dart';
 
 import '../../schema/schema_component.dart';
+import '../field_registry.dart';
 import '../field_state.dart';
+import '../form_values.dart';
 
 /// The widgets a form field is built from — one per writable contract type.
 ///
@@ -115,6 +119,22 @@ class SelectFieldWidget extends StatelessWidget {
       (option) => option.value == state.value,
     );
 
+    // The open menu is a route pushed onto the Navigator, mounted ABOVE this
+    // field, so it does not inherit the screen's `Directionality` on its own
+    // — the same overlay class as the dialogs, sheets and pickers elsewhere
+    // in this file (whole-branch review finding 1: an RTL panel inside an LTR
+    // host rendered the closed field RTL and every open option list LTR).
+    // `DropdownButtonFormField` has no `builder:` to override, so each item
+    // carries the direction itself: `Directionality` for the label's own text
+    // and an already-resolved `Alignment` for which edge it hugs, since
+    // `DropdownMenuItem`'s default `AlignmentDirectional` would resolve
+    // against the route's direction too.
+    //
+    // `Directionality.of(context)` is correct HERE — this is a
+    // `StatelessWidget`'s own `build` context, genuinely below the screen's
+    // wrap, not the `State`-method ancestor trap `textDirectionOf` exists for.
+    final direction = Directionality.of(context);
+
     return DropdownButtonFormField<Object?>(
       initialValue: offered ? state.value : null,
       onChanged: state.enabled ? state.onChanged : null,
@@ -125,7 +145,16 @@ class SelectFieldWidget extends StatelessWidget {
       ),
       items: [
         for (final option in component.options)
-          DropdownMenuItem(value: option.value, child: Text(option.label)),
+          DropdownMenuItem(
+            value: option.value,
+            alignment: direction == TextDirection.rtl
+                ? Alignment.centerRight
+                : Alignment.centerLeft,
+            child: Directionality(
+              textDirection: direction,
+              child: Text(option.label),
+            ),
+          ),
       ],
     );
   }
@@ -256,11 +285,20 @@ class DateFieldWidget extends StatelessWidget {
   }
 
   Future<void> _pick(BuildContext context, DateTime? current) async {
+    // Both pickers render through the Navigator's own overlay — a route,
+    // not a descendant of this field's context — so they do not inherit
+    // this screen's `Directionality` on their own (review finding 2). Each
+    // picker's `builder:` param exists for exactly this kind of override.
+    final direction = Directionality.of(context);
+    Widget wrapDirection(BuildContext _, Widget? child) =>
+        Directionality(textDirection: direction, child: child!);
+
     final date = await showDatePicker(
       context: context,
       initialDate: current ?? DateTime.now(),
       firstDate: component.minDate ?? DateTime(1900),
       lastDate: component.maxDate ?? DateTime(2100),
+      builder: wrapDirection,
     );
     if (date == null || !context.mounted) return;
 
@@ -274,6 +312,7 @@ class DateFieldWidget extends StatelessWidget {
       initialTime: current == null
           ? TimeOfDay.now()
           : TimeOfDay.fromDateTime(current),
+      builder: wrapDirection,
     );
     if (time == null) return;
 
@@ -289,10 +328,28 @@ class DateFieldWidget extends StatelessWidget {
   }
 }
 
-/// `file`. Upload itself is deferred to a later phase (see
-/// [FileComponent]'s doc), so this control is always inert regardless of
-/// `state.enabled` — there is nowhere for a picked file to go yet.
-class FileFieldWidget extends StatelessWidget {
+/// `file`. Never directly typed into — [state.value] is always a stored
+/// path, never free text — so the display control is permanently read-only.
+/// The *choose* control is separate: a choose/replace button, shown only
+/// when every one of these holds, same "hard gate" rule the file atop this
+/// list documents for every other field — `state.enabled == false` disables
+/// the real control, not just its colours:
+///
+///  - the server left this field writable (`!component.readOnly`);
+///  - `state.enabled` — a `disabled()` closure or a disabled ancestor
+///    container is not a file-specific concern, but it gates this control
+///    the same as every other one;
+///  - the host supplied a picker (`state.filePicker`).
+///
+/// A `readOnly: true` component shows [FilamentStrings.fileFieldReadOnly]
+/// and stays inert even with a picker supplied — the server's word always
+/// wins. Otherwise missing a picker shows [FilamentStrings.filePickerUnavailable]
+/// instead — never a control that cannot work, the same principle
+/// [FilamentStrings.chartUnavailable] follows for a missing chart renderer.
+/// A merely-disabled-but-otherwise-workable field shows neither note, same
+/// as every other disabled field type: it looks inert, it does not claim a
+/// reason that isn't true.
+class FileFieldWidget extends StatefulWidget {
   const FileFieldWidget({
     required this.component,
     required this.state,
@@ -303,22 +360,316 @@ class FileFieldWidget extends StatelessWidget {
   final FieldState state;
 
   @override
+  State<FileFieldWidget> createState() => _FileFieldWidgetState();
+}
+
+class _FileFieldWidgetState extends State<FileFieldWidget> {
+  bool _uploading = false;
+
+  /// Set when [widget.state.filePicker] itself throws — a permission denial
+  /// is the common case for a real picker plugin, not an exotic one. Cleared
+  /// at the start of every attempt, so a retry that succeeds replaces it.
+  String? _pickerError;
+
+  bool get _canChoose =>
+      widget.state.enabled &&
+      !widget.component.readOnly &&
+      widget.state.filePicker != null &&
+      widget.state.uploadFile != null;
+
+  @override
   Widget build(BuildContext context) {
-    return _TextControl(
-      value: state.value?.toString(),
-      // Forced regardless of state.enabled — upload has nowhere to go yet.
-      // `_TextControl` is the single place that turns `enabled: false` into a
-      // genuinely null `onChanged`, so this widget hands it the real
-      // callback rather than pre-nulling it itself.
-      enabled: false,
-      onChanged: state.onChanged,
-      decoration: InputDecoration(
-        labelText: component.label,
-        helperText: component.helperText,
-        errorText: state.error,
-        suffixIcon: const Icon(Icons.attach_file),
+    final strings = widget.state.strings;
+    final value = widget.state.value?.toString();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _TextControl(
+          value: value == null ? null : _basename(value),
+          enabled: false,
+          readOnly: true,
+          decoration: InputDecoration(
+            labelText: widget.component.label,
+            helperText: _helperText(strings),
+            errorText: widget.state.error ?? _pickerError,
+            suffixIcon: const Icon(Icons.attach_file),
+          ),
+        ),
+        if (_canChoose)
+          TextButton(
+            // Disabled, not merely re-guarded: `_choose` already refuses a
+            // re-entrant call, but a control that still *looks* tappable
+            // while an upload is in flight invites exactly the double-tap
+            // this guards against.
+            onPressed: _uploading ? null : _choose,
+            child: Text(_uploading ? strings.uploading : strings.chooseFile),
+          ),
+      ],
+    );
+  }
+
+  /// The server's rule always wins, then the host's capability gap; a
+  /// field that is merely disabled falls through to its own `helperText`
+  /// (possibly none) rather than a note claiming a reason that isn't true.
+  String? _helperText(FilamentStrings strings) {
+    if (widget.component.readOnly) return strings.fileFieldReadOnly;
+    if (widget.state.filePicker == null) return strings.filePickerUnavailable;
+    return widget.component.helperText;
+  }
+
+  Future<void> _choose() async {
+    if (_uploading) return;
+
+    // Set before the picker even runs, synchronously, so a second tap
+    // landing before this frame rebuilds still sees it and bails out above —
+    // the button's own `onPressed: null` is the second, framework-level
+    // guard, not the only one.
+    setState(() {
+      _uploading = true;
+      _pickerError = null;
+    });
+    try {
+      final PickedFile? picked;
+      try {
+        picked = await widget.state.filePicker!(widget.component);
+      } catch (e) {
+        // Degrade, never crash — the same rule
+        // `ResourceFormProvider.searchOptions()` follows for a host-driven
+        // async failure, adapted to actually tell the user something: unlike
+        // a search there is no cached result to fall back to showing.
+        if (mounted) {
+          setState(() => _pickerError = widget.state.strings.uploadFailed);
+        }
+        return;
+      }
+      if (picked == null) return;
+
+      await widget.state.uploadFile!(
+        bytes: picked.bytes,
+        filename: picked.filename,
+      );
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  String _basename(String path) {
+    final index = path.lastIndexOf('/');
+    return index == -1 ? path : path.substring(index + 1);
+  }
+}
+
+/// `repeater`. One card per row, built by walking [RepeaterComponent.children]
+/// — the item **template**, published once and walked once per row in the
+/// value, never re-parsed per row.
+///
+/// Row values live in the form state as a genuine `List<Map>` under this
+/// field's own name. Editing a child field in one row replaces only that
+/// row's map inside a freshly-built list — every other row's map is the same
+/// object it was before — so a flat-state bug that lets two rows share one
+/// value cannot hide here: row 1 changing would mean row 1's map itself
+/// changed, and it never does from an edit inside row 2.
+///
+/// `component.readOnly` (the server's own rule) or `state.enabled == false`
+/// (a host or closure-driven gate) renders every row inert with no Add or
+/// Remove control — the same "server's word wins" rule [FileFieldWidget]
+/// follows for a picker the host did supply.
+///
+/// Per-row errors reuse the form's existing flat error map rather than a new
+/// channel: `client_validator.dart` keys a required child empty in row 2 as
+/// `'<name>.1.<child>'`, the same shape a server `422` uses for
+/// `items.0.name`, and this widget reads it out of [FieldState.errors] —
+/// never a generic message for the whole field.
+///
+/// Nested repeaters are out of scope: a repeater inside a repeater's
+/// template renders through this same widget recursively, and the walker
+/// publishes a nested one `readOnly: true` — so there is no special case
+/// here beyond honouring that flag like any other. (Until P6c's close-out
+/// nothing published it: a nested repeater arrived editable, and its 422
+/// came back keyed `outer.0.inner.1.x`, which this widget has no field to
+/// render against — a form that could not be submitted and could not say
+/// why. The server publishes the flag now; this docblock describes what
+/// ships.)
+///
+/// [registry] is the host's own — the same registry that built this widget —
+/// so a host-registered field type, or a host override of a built-in one,
+/// renders inside a row exactly as it does everywhere else on the form.
+/// Null falls back to the defaults, for a caller constructing this widget
+/// directly rather than through [FieldRegistry.build].
+class RepeaterFieldWidget extends StatelessWidget {
+  const RepeaterFieldWidget({
+    required this.component,
+    required this.state,
+    this.registry,
+    super.key,
+  });
+
+  final RepeaterComponent component;
+  final FieldState state;
+  final FieldRegistry? registry;
+
+  bool get _inert => component.readOnly || !state.enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final strings = state.strings;
+    final raw = state.value;
+    final rows = raw is List
+        ? raw.whereType<Map>().map(Map<String, Object?>.from).toList()
+        : <Map<String, Object?>>[];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (component.label != null)
+          Text(
+            component.label!,
+            style: Theme.of(context).textTheme.labelMedium,
+          ),
+        if (component.readOnly)
+          Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 8),
+            child: Text(
+              strings.repeaterReadOnly,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        for (var index = 0; index < rows.length; index++)
+          _row(context, rows, index),
+        if (component.addable && !_inert && !_atCap(rows.length))
+          TextButton.icon(
+            key: const ValueKey('repeater.add'),
+            onPressed: () =>
+                state.onChanged([...rows, _defaultRow(component.children)]),
+            icon: const Icon(Icons.add),
+            label: Text(strings.addItem),
+          ),
+        if (state.error != null) _ErrorText(state.error!),
+      ],
+    );
+  }
+
+  bool _atCap(int count) =>
+      component.maxItems != null && count >= component.maxItems!;
+
+  bool _atFloor(int count) =>
+      component.minItems != null && count <= component.minItems!;
+
+  Widget _row(
+    BuildContext context,
+    List<Map<String, Object?>> rows,
+    int index,
+  ) {
+    final row = rows[index];
+
+    return Card(
+      key: ValueKey('repeater.${component.name}.row.$index'),
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final child in _rowFields(component.children))
+              _childField(context, rows, index, row, child),
+            if (component.deletable && !_inert && !_atFloor(rows.length))
+              Align(
+                alignment: AlignmentDirectional.centerEnd,
+                child: TextButton.icon(
+                  key: ValueKey('repeater.remove.$index'),
+                  onPressed: () {
+                    final next = List<Map<String, Object?>>.of(rows)
+                      ..removeAt(index);
+                    state.onChanged(next);
+                  },
+                  icon: const Icon(Icons.remove_circle_outline),
+                  label: Text(state.strings.removeItem),
+                ),
+              ),
+          ],
+        ),
       ),
     );
+  }
+
+  Widget _childField(
+    BuildContext context,
+    List<Map<String, Object?>> rows,
+    int index,
+    Map<String, Object?> row,
+    SchemaComponent child,
+  ) {
+    final name = child.name!;
+    final childState = FieldState(
+      value: row[name],
+      onChanged: (value) {
+        final nextRow = Map<String, Object?>.of(row)..[name] = value;
+        final next = List<Map<String, Object?>>.of(rows)..[index] = nextRow;
+        state.onChanged(next);
+      },
+      // This child's OWN key only. The whole [FieldState.errors] map is
+      // deliberately not forwarded: the only widget that reads it is this
+      // one, for a nested repeater, and a nested repeater is inert — its
+      // keys are `outer.0.inner.1.x` and this widget would look them up as
+      // `inner.1.x`, so forwarding would hand a child a map it cannot key
+      // into. Every editable child shape gets its error through `error`.
+      error: state.errors['${component.name}.$index.$name'],
+      enabled: !_inert && !child.disabled && child.writable,
+      strings: state.strings,
+    );
+
+    return Padding(
+      key: ValueKey('repeater.${component.name}.$index.$name'),
+      padding: const EdgeInsets.only(bottom: 8),
+      child: (registry ?? FieldRegistry.defaults()).build(
+        context,
+        child,
+        childState,
+      ),
+    );
+  }
+}
+
+/// The named leaf fields reachable from one row of a repeater's item
+/// template — the same "container gates its whole subtree, only `hidden`
+/// removes a control outright" recursion [ResourceFormScreen] uses for the
+/// top-level form, so a template can nest a `Section`/`Grid` exactly as the
+/// top level can, per the wire shape's own doc: "the same shape layout
+/// components already use". Unlike `writableFields()` this does not gate on
+/// `disabled`/`writable` — a disabled child still renders, inert, same as
+/// any other field; only [FieldState.enabled] (via `_childField`) decides
+/// that, not what reaches the screen at all.
+/// A new row's starting values — the item template's own `default`s, seeded
+/// through the exact same [FormValues.initial] every other field's initial
+/// value goes through, not a second, hand-rolled notion of "default".
+/// Without this an added row rendered empty while `_validateRows`
+/// (`client_validator.dart`) judged it against these same defaults through
+/// that same call — so a required child with a `default` showed no error on
+/// an empty-looking row, and the empty row, not the default, is what shipped.
+/// Seeding here makes what renders, what validates and what submits the one
+/// same row.
+Map<String, Object?> _defaultRow(List<SchemaComponent> children) {
+  final seeded = FormValues.initial(children);
+  return {
+    for (final field in _rowFields(children)) field.name!: seeded[field.name!],
+  };
+}
+
+Iterable<SchemaComponent> _rowFields(List<SchemaComponent> children) sync* {
+  for (final child in children) {
+    if (child.hidden) continue;
+    switch (child) {
+      case LayoutComponent(:final children):
+        yield* _rowFields(children);
+      case UnknownComponent(:final children):
+        yield* _rowFields(children);
+      default:
+        if (child.name != null) yield child;
+    }
   }
 }
 
@@ -330,7 +681,7 @@ class _ErrorText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(left: 12, bottom: 8),
+      padding: const EdgeInsetsDirectional.only(start: 12, bottom: 8),
       child: Text(
         message,
         style: TextStyle(
@@ -450,12 +801,20 @@ class RemoteSelectField extends StatelessWidget {
   }
 
   Future<void> _open(BuildContext context) async {
+    // Same overlay issue as the date/time pickers above — captured before
+    // the sheet opens since its own `builder` context does not inherit this
+    // field's `Directionality` (review finding 2).
+    final direction = Directionality.of(context);
+
     final picked = await showModalBottomSheet<SelectOption>(
       context: context,
       isScrollControlled: true,
-      builder: (context) => _RemoteSearchSheet(
-        label: component.label,
-        search: state.searchOptions!,
+      builder: (context) => Directionality(
+        textDirection: direction,
+        child: _RemoteSearchSheet(
+          label: component.label,
+          search: state.searchOptions!,
+        ),
       ),
     );
 

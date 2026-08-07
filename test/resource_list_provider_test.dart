@@ -1,7 +1,10 @@
+import 'package:filament_mobile/dashboard/dashboard_data.dart';
 import 'package:filament_mobile/data/paginated_records.dart';
 import 'package:filament_mobile/data/action_result.dart';
 import 'package:filament_mobile/data/resource_data_source.dart';
+import 'package:filament_mobile/schema/relation_descriptor.dart';
 import 'package:filament_mobile/data/resource_record.dart';
+import 'package:filament_mobile/data/upload_result.dart';
 import 'package:filament_mobile/data/write_result.dart';
 import 'package:filament_mobile/ports/filament_transport.dart';
 import 'package:filament_mobile/schema/panel_schema.dart';
@@ -22,6 +25,14 @@ class _ListSource implements ResourceDataSource {
   final int? failOnPage;
   final List<({int page, String? search, String? sort, String? direction})>
   calls = [];
+
+  @override
+  Future<PaginatedRecords> relation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation, {
+    int page = 1,
+  }) async => throw UnimplementedError();
 
   @override
   Future<PaginatedRecords> list(
@@ -48,6 +59,9 @@ class _ListSource implements ResourceDataSource {
 
   @override
   Future<PanelSchema> panel() async => throw UnimplementedError();
+
+  @override
+  Future<PanelSchema?> cachedPanel() async => null;
 
   @override
   Future<ResourceRecord> record(String resourceKey, Object id) async =>
@@ -94,6 +108,17 @@ class _ListSource implements ResourceDataSource {
     Object? recordId,
     required Map<String, dynamic> values,
     required String changed,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<DashboardData> dashboard() => throw UnimplementedError();
+
+  @override
+  Future<UploadResult> uploadFile(
+    String resourceKey,
+    String field, {
+    required List<int> bytes,
+    required String filename,
   }) => throw UnimplementedError();
 }
 
@@ -206,6 +231,46 @@ void main() {
     expect(provider.records, hasLength(2));
     expect(provider.errorMessage, contains('boom'));
     expect(provider.isLoadingMore, isFalse);
+    // The dead-write the P6d Task 8 review caught: `errorMessage` alone is
+    // read by nothing once `status` stays `success` — `loadMoreFailed` is
+    // the flag `PaginatedCardList`'s trailing row actually renders on.
+    expect(provider.loadMoreFailed, isTrue);
+  });
+
+  test('a 401 during loadMore reaches the unauthenticated state, not a retry '
+      'prompt that can only fail again', () async {
+    // The session expiring mid-scroll. Keeping the rows and offering a retry
+    // is right for a timeout and wrong here: every retry 401s the same way,
+    // so the user sat on a generic error forever instead of being told they
+    // were signed out. Both providers had the same hole.
+    final provider = providerFor(
+      _ListSource(
+        failOnPage: 2,
+        error: const FilamentTransportException(
+          'Unauthenticated.',
+          statusCode: 401,
+        ),
+      ),
+    );
+
+    await provider.load();
+    await provider.loadMore();
+
+    expect(provider.isUnauthenticated, isTrue);
+    expect(provider.status, LoadStatus.failure);
+  });
+
+  test('loadMoreFailed clears on refresh() — never left stuck showing a retry '
+      'prompt for an error a fresh load has already superseded', () async {
+    final provider = providerFor(_ListSource(failOnPage: 2));
+
+    await provider.load();
+    await provider.loadMore();
+    expect(provider.loadMoreFailed, isTrue);
+
+    await provider.refresh();
+
+    expect(provider.loadMoreFailed, isFalse);
   });
 
   // Sibling to the test above: the same rule is only meaningful as a pair —

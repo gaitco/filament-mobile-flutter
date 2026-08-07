@@ -2,8 +2,26 @@ import 'package:equatable/equatable.dart';
 
 import 'card_layout.dart';
 import 'json_reader.dart';
+import 'relation_descriptor.dart';
 import 'resource_labels.dart';
 import 'schema_component.dart';
+
+/// The panel's layout direction, published on the wire as a closed set.
+///
+/// Deliberately not `dart:ui`'s `TextDirection` — the schema layer imports
+/// only `equatable` and its own siblings, no Flutter. The UI layer maps this
+/// to `TextDirection` where it renders.
+enum PanelDirection {
+  ltr,
+  rtl;
+
+  /// Absent or unrecognised reads as [ltr] — a server predating this field,
+  /// or one whose override didn't survive normalisation, gets today's
+  /// behaviour rather than a thrown error. The server already normalises
+  /// `direction` to `ltr`/`rtl`; the client does not trust that it did.
+  static PanelDirection fromJson(Object? value) =>
+      value == 'rtl' ? PanelDirection.rtl : PanelDirection.ltr;
+}
 
 class ResourceSearch extends Equatable {
   const ResourceSearch({this.enabled = false, this.placeholder});
@@ -76,10 +94,21 @@ class ResourceSchema extends Equatable {
     this.filters = const [],
     this.form = const [],
     this.infolist = const [],
+    this.relations = const [],
     this.group,
+    this.direction = PanelDirection.ltr,
   });
 
-  factory ResourceSchema.fromJson(Map<String, dynamic> json, String path) {
+  /// [direction] is not read off [json] — a resource's direction always
+  /// comes from its panel. It defaults to [PanelDirection.ltr] so a directly
+  /// constructed resource (tests, the contract test, [ResourceSchema.fake])
+  /// keeps working unchanged; [PanelSchema.fromJson] passes the panel's
+  /// parsed direction into every resource it builds.
+  factory ResourceSchema.fromJson(
+    Map<String, dynamic> json,
+    String path, {
+    PanelDirection direction = PanelDirection.ltr,
+  }) {
     final sortNodes = objects(json, 'sorts', path);
     final rawGroup = opt<String>(json, 'group');
 
@@ -110,7 +139,15 @@ class ResourceSchema extends Equatable {
       filters: SchemaComponent.listFromJson(json, 'filters', path),
       form: SchemaComponent.listFromJson(json, 'form', path),
       infolist: SchemaComponent.listFromJson(json, 'infolist', path),
+      // Same rule as [direction] on this resource itself: propagated at parse
+      // time, not read off each relation's own JSON (which carries none).
+      relations: RelationDescriptor.listFromJson(
+        json,
+        path,
+        direction: direction,
+      ),
       group: rawGroup?.isEmpty ?? false ? null : rawGroup,
+      direction: direction,
     );
   }
 
@@ -152,7 +189,13 @@ class ResourceSchema extends Equatable {
   final List<SchemaComponent> filters;
   final List<SchemaComponent> form;
   final List<SchemaComponent> infolist;
+  final List<RelationDescriptor> relations;
   final String? group;
+
+  /// The owning panel's layout direction, propagated at parse time by
+  /// [PanelSchema.fromJson]. Defaults to [PanelDirection.ltr] for a
+  /// directly-constructed resource — see [ResourceSchema.fromJson].
+  final PanelDirection direction;
 
   ResourceSort? get defaultSort {
     for (final sort in sorts) {

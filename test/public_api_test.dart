@@ -45,4 +45,31 @@ void main() {
       'translated',
     );
   });
+
+  test('a host can name and switch over every upload outcome', () {
+    // Same shape as the write outcomes above: the sealed type and both
+    // subtypes by name.
+    final outcomes = <UploadResult>[
+      const UploadSuccess('avatars/1/photo.png'),
+      const UploadFailed('too large'),
+    ];
+
+    final labels = [
+      for (final outcome in outcomes)
+        switch (outcome) {
+          UploadSuccess(:final path) => 'success $path',
+          UploadFailed(:final message) => message,
+        },
+    ];
+
+    expect(labels, ['success avatars/1/photo.png', 'too large']);
+  });
+
+  test('a host can name the upload port type', () {
+    // FilamentUploadTransport is optional and abstract — a host implements
+    // it, this package never instantiates it — so naming the type is the
+    // whole test: it fails to compile if the barrel stops exporting it.
+    FilamentUploadTransport? port;
+    expect(port, isNull);
+  });
 }

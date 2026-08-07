@@ -183,4 +183,70 @@ void main() {
     expect(find.text('أحمد'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  // Fix round 1, finding 1: `_text()` used to isolate a badge's value
+  // *before* handing it to `SemanticBadge`, whose `colors[value]` lookup is
+  // keyed on the raw server value. Under RTL, a badge value matching the
+  // grouped-digit pattern (a lot number, an SKU) got isolated first, the
+  // lookup key no longer matched, and the chip silently lost its colour —
+  // green under LTR, theme-default grey under RTL, for the exact same data.
+  testWidgets('a badge value with grouped digits keeps its colour under RTL', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Directionality(
+          textDirection: TextDirection.rtl,
+          child: Scaffold(
+            body: ResourceCard(
+              layout: const CardLayout(
+                titleField: 'name',
+                badges: [
+                  CardBadge(field: 'lot', colors: {'12-34': 'success'}),
+                ],
+              ),
+              record: ResourceRecord.fromJson(const {
+                'id': 1,
+                'name': 'x',
+                'lot': '12-34',
+              }, 'id'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final chip = tester.widget<Chip>(find.byType(Chip));
+    expect(
+      chip.backgroundColor,
+      isNotNull,
+      reason:
+          'colors["12-34"] must still resolve under RTL — the badge\'s '
+          'displayed text may be isolated, but the colour lookup key '
+          'must stay the raw server value',
+    );
+  });
+
+  // Fix round 1, finding 3: `_text()`'s `formatDates` flag exists so only
+  // `meta` reformats an ISO-8601-shaped string as a localised date — a
+  // title or subtitle holding the same shape must print raw, exactly as it
+  // did before this task touched `_text()`'s signature. Nothing pinned that
+  // boundary; this reds if `formatDates`'s default is ever flipped to true.
+  testWidgets('a date-shaped title is not reformatted, unlike meta', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      wrap(
+        ResourceCard(
+          layout: const CardLayout(titleField: 'name'),
+          record: ResourceRecord.fromJson(const {
+            'id': 1,
+            'name': '2026-08-03',
+          }, 'id'),
+        ),
+      ),
+    );
+
+    expect(find.text('2026-08-03'), findsOneWidget);
+  });
 }

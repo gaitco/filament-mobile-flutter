@@ -23,6 +23,43 @@ Map<String, String> validate(
   for (final field in writableFields(components)) {
     final message = _validateField(field, values, strings);
     if (message != null) errors[field.name!] = message;
+
+    if (field is RepeaterComponent) {
+      errors.addAll(_validateRows(field, values, strings));
+    }
+  }
+  return errors;
+}
+
+/// Per-row, per-child errors for a repeater — [_validateField] run against
+/// each child's own rules exactly as it runs for a flat field, just fed a
+/// [FormValues] seeded from one row instead of the whole form. Keyed
+/// `'<repeater>.<row>.<child>'`, the same shape Laravel's own `422` uses for
+/// `items.0.name`, so a required child empty in row 2 lands on row 2 — never
+/// folded into one generic message for the whole repeater.
+Map<String, String> _validateRows(
+  RepeaterComponent field,
+  FormValues values,
+  FilamentStrings strings,
+) {
+  final rows = values[field.name!];
+  if (rows is! List) return const {};
+
+  final errors = <String, String>{};
+  for (var index = 0; index < rows.length; index++) {
+    final row = rows[index];
+    if (row is! Map) continue;
+
+    final rowValues = FormValues.initial(
+      field.children,
+      from: Map<String, dynamic>.from(row),
+    );
+    for (final child in writableFields(field.children)) {
+      final message = _validateField(child, rowValues, strings);
+      if (message != null) {
+        errors['${field.name}.$index.${child.name}'] = message;
+      }
+    }
   }
   return errors;
 }

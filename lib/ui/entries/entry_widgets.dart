@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../bidi_text.dart';
 import '../semantic_badge.dart';
 
 /// The tiles an infolist is built from. Every one of them is label-above-value,
-/// so they share [_Labelled] and differ only in how the value is drawn.
+/// so they share [Labelled] and differ only in how the value is drawn.
 ///
 /// A missing value is never an error here: the server sends whatever the record
 /// holds, and a null renders as an em dash (or, for an image, a placeholder)
@@ -23,12 +24,16 @@ class EntryTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _Labelled(
+    // Grouped digits (a phone number, a spaced IBAN, a hyphenated tax
+    // number) reverse inside RTL text otherwise — see `bidi_text.dart`. A
+    // no-op under LTR and on plain prose with no such run.
+    final text = value == null
+        ? _emptyValue
+        : isolateGroupedDigits(value!, Directionality.of(context));
+
+    return Labelled(
       label: label,
-      child: Text(
-        value ?? _emptyValue,
-        style: Theme.of(context).textTheme.bodyMedium,
-      ),
+      child: Text(text, style: Theme.of(context).textTheme.bodyMedium),
     );
   }
 }
@@ -42,7 +47,7 @@ class BooleanEntryTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _Labelled(
+    return Labelled(
       label: label,
       child: Icon(
         value ? Icons.check_circle : Icons.cancel,
@@ -68,7 +73,7 @@ class ImageEntryTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final url = this.url;
 
-    return _Labelled(
+    return Labelled(
       label: label,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(8),
@@ -113,7 +118,7 @@ class BadgeEntryTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final value = this.value;
 
-    return _Labelled(
+    return Labelled(
       label: label,
       child: value == null
           ? Text(_emptyValue, style: Theme.of(context).textTheme.bodyMedium)
@@ -159,8 +164,12 @@ class SectionTile extends StatelessWidget {
 const String _emptyValue = '—';
 
 /// The one shape every entry shares: a small label with its value beneath.
-class _Labelled extends StatelessWidget {
-  const _Labelled({required this.child, this.label});
+///
+/// Public — not just this file's tiles — so `RichEntryTile`
+/// (`rich_entry_tile.dart`) wraps in the same shape rather than
+/// re-implementing it.
+class Labelled extends StatelessWidget {
+  const Labelled({required this.child, this.label, super.key});
 
   final String? label;
   final Widget child;

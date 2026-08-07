@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../data/options_page.dart';
 import '../data/resource_data_source.dart';
+import '../data/upload_result.dart';
 import '../data/write_result.dart';
 import '../form/client_validator.dart';
 import '../form/form_values.dart';
@@ -154,19 +155,93 @@ class ResourceFormProvider extends ChangeNotifier {
   /// round-trips; a provider that called on every keystroke would be the
   /// performance bug `live` exists to avoid.
   void change(String name, Object? value) {
+    final previous = _values[name];
     _values = _values.set(name, value);
 
     // The server's message for this field described the value that was just
     // replaced. Leaving it up would blame the user for the edit they made.
-    if (_fieldErrors.containsKey(name)) {
-      _fieldErrors = Map.unmodifiable(
-        Map<String, String>.of(_fieldErrors)..remove(name),
-      );
+    if (_fieldErrors.isNotEmpty) {
+      final next = Map<String, String>.of(_fieldErrors)..remove(name);
+
+      // A repeater's own onChanged always replaces its whole row list, so a
+      // row-scoped error ('<name>.<row>.<child>', the same shape
+      // `client_validator.dart` and a server 422 both use) is never named by
+      // `name` alone and would otherwise survive however many times the row
+      // it names gets fixed — this is new with repeater support; no other
+      // field produces a dotted error key that `remove(name)` above can't
+      // reach. `RepeaterFieldWidget` gives every *untouched* row the same
+      // Map instance across an edit (its own row-independence guarantee —
+      // see its class doc), so identity alone says which row actually
+      // changed, and only that row's stale errors clear — a still-invalid
+      // sibling row keeps its error.
+      if (previous is List && value is List) {
+        for (var i = 0; i < value.length; i++) {
+          if (i < previous.length && identical(previous[i], value[i])) {
+            continue;
+          }
+          next.removeWhere((key, _) => key.startsWith('$name.$i.'));
+        }
+      }
+
+      _fieldErrors = Map.unmodifiable(next);
     }
 
     if (_isLive(name)) _scheduleState(name);
 
     notifyListeners();
+  }
+
+  /// Uploads bytes for a single-file field and applies the outcome.
+  ///
+  /// Success goes through [change] — the field's value becomes the stored
+  /// path, and any stale error on it clears the same way any other edit
+  /// clears one.
+  ///
+  /// Failure routes on [UploadFailed.statusCode], the same way [submit]
+  /// routes a write's `422` by field name: a `422` is *this* field's own
+  /// refusal (too large, wrong type) and lands as its error, value
+  /// untouched — a failed upload must never clear a file the record already
+  /// has. Anything else — a bare 403/500, an offline transport, a host that
+  /// never implemented `FilamentUploadTransport` — is not a fact about what
+  /// the user picked, so it reaches [formError] instead, same as an
+  /// unmappable write failure.
+  Future<void> uploadFile(
+    String name, {
+    required List<int> bytes,
+    required String filename,
+  }) async {
+    final result = await _source.uploadFile(
+      resource.key,
+      name,
+      bytes: bytes,
+      filename: filename,
+    );
+
+    // Disposal can land during the await — the user backed out of the form
+    // mid-upload. Guarded here, where the asymmetry is: both failure
+    // branches already notify through _notify(), but success routes through
+    // [change], whose bare notifyListeners() asserts on a disposed
+    // ChangeNotifier. change() itself stays unguarded on purpose — its
+    // other callers are synchronous taps from a live widget, and a
+    // silently-no-op change() would hide a real lifecycle bug there.
+    if (_disposed) return;
+
+    switch (result) {
+      case UploadSuccess(:final path):
+        change(name, path);
+      case UploadFailed(:final message, :final statusCode)
+          when statusCode == 422:
+        _fieldErrors = Map.unmodifiable({
+          ..._fieldErrors,
+          name: message ?? strings.uploadFailed,
+        });
+        _notify();
+      case UploadFailed(:final message):
+        _formError = (message == null || message.isEmpty)
+            ? strings.uploadFailed
+            : message;
+        _notify();
+    }
   }
 
   /// Validates client-side first, then writes. Returns true only when saved.
@@ -233,16 +308,40 @@ class ResourceFormProvider extends ChangeNotifier {
   }
 
   /// Laravel keys its `422` by field name. A key matching no field on this
-  /// screen — `tags.0.id` from a nested repeater, or a rule on a column the
-  /// form does not show — goes to the banner rather than into a map nothing
-  /// renders: an error the user cannot see is how a form becomes unsubmittable
-  /// with no explanation.
+  /// screen — a rule on a column the form does not show — goes to the
+  /// banner rather than into a map nothing renders: an error the user cannot
+  /// see is how a form becomes unsubmittable with no explanation.
   ///
   /// "Matching a field" means matching a *renderable* one, so a message aimed
   /// at a hidden or disabled field also reaches the banner instead of a
   /// control that is not on screen.
+  ///
+  /// A key shaped `'<repeater>.<row>.<child>'` — Laravel's own `422` shape
+  /// for a repeater's per-item rules, e.g. `items.0.name` — is the
+  /// *authoritative* twin of the row-scoped keys `client_validator.dart`
+  /// already produces client-side, so it lands in the same [mapped] map
+  /// [FieldState.errors] already reads, not a second path: its first segment
+  /// is checked against the writable repeaters on screen, the same "matching
+  /// a renderable one" rule above.
+  ///
+  /// **Exactly three segments**, and that is the renderability test rather
+  /// than a formatting nicety: `RepeaterFieldWidget` looks an error up as
+  /// `'<name>.<index>.<child>'`, so three is the only depth any widget on this
+  /// screen can key into. Layout nesting inside an item template does not
+  /// lengthen the path — a `Section`-wrapped child is still `items.*.sku`,
+  /// pinned server-side in `RepeaterRulesTest` — and only a NESTED repeater
+  /// does. Its key (`outer.0.inner.1.x`) used to be accepted here because the
+  /// first segment matched, land in [mapped], and then render nowhere: no
+  /// field could key it and the banner never saw it. The user pressed Save,
+  /// nothing happened, and nothing said why. Anything deeper now falls
+  /// through to the banner unattributed, which is what the banner is for.
   void _applyServerErrors(Map<String, List<String>> errors) {
-    final names = {for (final field in writableFields(_components)) field.name};
+    final fields = writableFields(_components).toList();
+    final names = {for (final field in fields) field.name};
+    final repeaterNames = {
+      for (final field in fields)
+        if (field is RepeaterComponent) field.name,
+    };
 
     final mapped = <String, String>{};
     final unmapped = <String>[];
@@ -257,7 +356,12 @@ class ResourceFormProvider extends ChangeNotifier {
       );
       if (message.isEmpty) continue;
 
+      final repeaterName = entry.key.split('.').first;
+
       if (names.contains(entry.key)) {
+        mapped[entry.key] = message;
+      } else if (entry.key.split('.').length == 3 &&
+          repeaterNames.contains(repeaterName)) {
         mapped[entry.key] = message;
       } else {
         unmapped.add(message);

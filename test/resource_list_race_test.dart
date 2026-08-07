@@ -1,9 +1,12 @@
 import 'dart:async';
 
+import 'package:filament_mobile/dashboard/dashboard_data.dart';
 import 'package:filament_mobile/data/paginated_records.dart';
 import 'package:filament_mobile/data/action_result.dart';
 import 'package:filament_mobile/data/resource_data_source.dart';
+import 'package:filament_mobile/schema/relation_descriptor.dart';
 import 'package:filament_mobile/data/resource_record.dart';
+import 'package:filament_mobile/data/upload_result.dart';
 import 'package:filament_mobile/data/write_result.dart';
 import 'package:filament_mobile/schema/panel_schema.dart';
 import 'package:filament_mobile/schema/resource_schema.dart';
@@ -18,6 +21,14 @@ import 'package:flutter_test/flutter_test.dart';
 class _GatedSource implements ResourceDataSource {
   final List<Completer<PaginatedRecords>> pending = [];
   final List<({int page, String? search})> calls = [];
+
+  @override
+  Future<PaginatedRecords> relation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation, {
+    int page = 1,
+  }) async => throw UnimplementedError();
 
   @override
   Future<PaginatedRecords> list(
@@ -49,6 +60,9 @@ class _GatedSource implements ResourceDataSource {
 
   @override
   Future<PanelSchema> panel() async => throw UnimplementedError();
+
+  @override
+  Future<PanelSchema?> cachedPanel() async => null;
 
   @override
   Future<ResourceRecord> record(String resourceKey, Object id) async =>
@@ -95,6 +109,17 @@ class _GatedSource implements ResourceDataSource {
     Object? recordId,
     required Map<String, dynamic> values,
     required String changed,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<DashboardData> dashboard() => throw UnimplementedError();
+
+  @override
+  Future<UploadResult> uploadFile(
+    String resourceKey,
+    String field, {
+    required List<int> bytes,
+    required String filename,
   }) => throw UnimplementedError();
 }
 

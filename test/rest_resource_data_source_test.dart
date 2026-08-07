@@ -1,9 +1,29 @@
 import 'package:filament_mobile/data/action_result.dart';
 import 'package:filament_mobile/data/rest_resource_data_source.dart';
+import 'package:filament_mobile/ports/filament_conditional_transport.dart';
+import 'package:filament_mobile/ports/filament_schema_cache.dart';
 import 'package:filament_mobile/ports/filament_transport.dart';
+import 'package:filament_mobile/schema/card_layout.dart';
+import 'package:filament_mobile/schema/relation_descriptor.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/fake_transport.dart';
+
+/// A trivial in-memory [FilamentSchemaCache], for wiring tests only — the
+/// store's own behaviour is covered by schema_cache_store_test.dart.
+class _FakeSchemaCache implements FilamentSchemaCache {
+  final _store = <String, CachedSchema>{};
+
+  @override
+  Future<CachedSchema?> read(String key) async => _store[key];
+
+  @override
+  Future<void> write(String key, CachedSchema value) async =>
+      _store[key] = value;
+
+  @override
+  Future<void> clear(String key) async => _store.remove(key);
+}
 
 Map<String, dynamic> get _panelJson => {
   'version': 1,
@@ -97,6 +117,80 @@ void main() {
 
     expect(transport.calls.last.query!.containsKey('search'), isFalse);
   });
+
+  test('relation() builds the documented path and parses rows by the RELATED '
+      "model's own recordKey, not the resource's", () async {
+    // recordKey `slug`, not `id` — this is what proves rows are parsed by
+    // `relation.recordKey` rather than a hardcoded `'id'` (the P6d Task 7
+    // review's Important 2), and distinctly from the panel resource's own
+    // `recordKey: 'id'` in `_panelJson` above.
+    const tags = RelationDescriptor(
+      key: 'tags',
+      label: 'Tags',
+      card: CardLayout.empty(),
+      recordKey: 'slug',
+    );
+
+    final transport = FakeTransport({
+      '/api/mobile-panel/schema': _panelJson,
+      '/api/mobile-panel/banners/7/relations/tags': {
+        'data': [
+          {'slug': 'sale', 'name': 'Sale'},
+        ],
+        'meta': {
+          'current_page': 1,
+          'last_page': 2,
+          'per_page': 15,
+          'total': 16,
+        },
+      },
+    });
+
+    final page = await sourceFor(
+      transport,
+    ).relation('banners', 7, tags, page: 1);
+
+    expect(page.records, hasLength(1));
+    expect(page.records.single.id, 'sale');
+    expect(page.records.single.get<String>('name'), 'Sale');
+    expect(page.meta.hasMore, isTrue);
+
+    final call = transport.calls.last;
+    expect(call.path, '/api/mobile-panel/banners/7/relations/tags');
+    expect(call.query, {'page': '1'});
+  });
+
+  test(
+    'relation() sends the requested page, not a hardcoded first page',
+    () async {
+      // Task 8 pages through this same call. A `page: 2` that reached the wire
+      // as `'page': '1'` would still return 200 against this fake (it ignores
+      // the query) and every other assertion here would stay green — the
+      // outgoing query is the only thing that can catch that regression.
+      const tags = RelationDescriptor(
+        key: 'tags',
+        label: 'Tags',
+        card: CardLayout.empty(),
+      );
+
+      final transport = FakeTransport({
+        '/api/mobile-panel/schema': _panelJson,
+        '/api/mobile-panel/banners/7/relations/tags': {
+          'data': [],
+          'meta': {
+            'current_page': 2,
+            'last_page': 2,
+            'per_page': 15,
+            'total': 16,
+          },
+        },
+      });
+
+      await sourceFor(transport).relation('banners', 7, tags, page: 2);
+
+      expect(transport.calls.last.query, {'page': '2'});
+    },
+  );
 
   test('record() parses the per-record permissions block', () async {
     final transport = FakeTransport({
@@ -327,6 +421,37 @@ void main() {
 
       expect(result, isA<ActionFailed>());
       expect((result as ActionFailed).message, 'Cannot do that yet');
+    },
+  );
+
+  test(
+    'cachedPanel() and panel() are wired through to the schema cache',
+    () async {
+      final cache = _FakeSchemaCache();
+      final transport = FakeConditionalTransport(
+        const {},
+        conditionalResponses: {
+          '/api/mobile-panel/schema': [
+            ConditionalResponse(
+              notModified: false,
+              body: _panelJson,
+              etag: '"abc"',
+            ),
+          ],
+        },
+      );
+      final source = RestResourceDataSource(
+        transport: transport,
+        cache: cache,
+        cacheKey: 'user:1',
+      );
+
+      expect(await source.cachedPanel(), isNull);
+
+      final panel = await source.panel();
+
+      expect(panel.resources.single.key, 'banners');
+      expect((await cache.read('user:1'))?.etag, '"abc"');
     },
   );
 }

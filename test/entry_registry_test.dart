@@ -1,5 +1,6 @@
 import 'package:filament_mobile/data/resource_record.dart';
 import 'package:filament_mobile/schema/schema_component.dart';
+import 'package:filament_mobile/ui/bidi_text.dart';
 import 'package:filament_mobile/ui/entry_registry.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -175,5 +176,46 @@ void main() {
     );
 
     expect(find.text('custom!'), findsOneWidget);
+  });
+
+  // Fix round 1, finding 2: `badge_entry` renders through `BadgeEntryTile` →
+  // `SemanticBadge`, a fourth render seam the original pass missed —
+  // `text_entry`'s value got isolated under RTL and `badge_entry`'s didn't,
+  // for the same grouped-digit value. Isolation now lives inside
+  // `SemanticBadge` itself (fix round 1), so both seams get it.
+  testWidgets('a badge entry isolates its value under RTL', (tester) async {
+    final record = ResourceRecord.fromJson(const {
+      'id': 1,
+      'lot': '+20 2 2411 8610',
+    }, 'id');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Directionality(
+          textDirection: TextDirection.rtl,
+          child: Scaffold(
+            body: Builder(
+              builder: (context) => EntryRegistry.defaults().build(
+                context,
+                parse(const {
+                  'type': 'badge_entry',
+                  'name': 'lot',
+                  'label': 'الدفعة',
+                }),
+                record,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final label = tester.widget<Text>(
+      find.descendant(of: find.byType(Chip), matching: find.byType(Text)),
+    );
+    expect(
+      label.data,
+      isolateGroupedDigits('+20 2 2411 8610', TextDirection.rtl),
+    );
   });
 }

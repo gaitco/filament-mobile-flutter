@@ -1,8 +1,11 @@
+import 'package:filament_mobile/dashboard/dashboard_data.dart';
 import 'package:filament_mobile/data/options_page.dart';
 import 'package:filament_mobile/data/paginated_records.dart';
 import 'package:filament_mobile/data/action_result.dart';
 import 'package:filament_mobile/data/resource_data_source.dart';
+import 'package:filament_mobile/schema/relation_descriptor.dart';
 import 'package:filament_mobile/data/resource_record.dart';
+import 'package:filament_mobile/data/upload_result.dart';
 import 'package:filament_mobile/data/write_result.dart';
 import 'package:filament_mobile/ports/filament_transport.dart';
 import 'package:filament_mobile/schema/panel_schema.dart';
@@ -25,6 +28,17 @@ class FakeSource implements ResourceDataSource {
 
   @override
   Future<PanelSchema> panel() async => throw error!;
+
+  @override
+  Future<PanelSchema?> cachedPanel() async => null;
+
+  @override
+  Future<PaginatedRecords> relation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation, {
+    int page = 1,
+  }) async => throw UnimplementedError();
 
   @override
   Future<PaginatedRecords> list(
@@ -76,6 +90,17 @@ class FakeSource implements ResourceDataSource {
     Object? recordId,
     required Map<String, dynamic> values,
     required String changed,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<DashboardData> dashboard() => throw UnimplementedError();
+
+  @override
+  Future<UploadResult> uploadFile(
+    String resourceKey,
+    String field, {
+    required List<int> bytes,
+    required String filename,
   }) => throw UnimplementedError();
 }
 

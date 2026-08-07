@@ -51,8 +51,13 @@ class FormValues {
   /// it got into the value map, can never reach the server this way.
   ///
   /// A name is included only when it is genuinely writable: not hidden, not
-  /// disabled, and not a [FileComponent] — the server ignores any `file` key
-  /// a client sends, so submitting one is noise at best.
+  /// disabled, and not a **read-only** [FileComponent] — a multiple (or
+  /// gated) file field the server marked `readOnly` still has nowhere for a
+  /// client-sent value to go, so submitting one is noise at best. A
+  /// single-file field the server left writable is different: by the time a
+  /// submit happens its value, if set, is already the path `/upload`
+  /// returned (see `ResourceFormProvider.uploadFile`), and the server
+  /// expects that path in the payload like any other field.
   /// A dotted name is a **path**, not a literal key: Laravel validates
   /// `title.ar` against `title[ar]`, and a translatable Filament field is
   /// published with exactly that name. Sending `{"title.ar": …}` flat makes
@@ -180,7 +185,14 @@ Iterable<SchemaComponent> writableFields(
         yield* writableFields(children);
       case UnknownComponent(:final children):
         yield* writableFields(children);
-      case FileComponent():
+      case FileComponent(:final readOnly) when readOnly:
+        continue;
+      // A repeater is one writable field, its own name — never its item
+      // template's field names — the client-side mirror of `WritableNames`
+      // contributing only the repeater's own key. A readOnly repeater (a
+      // relationship, or an older server that never published config) has
+      // the same nowhere-to-go problem a readOnly file field does.
+      case RepeaterComponent(:final readOnly) when readOnly:
         continue;
       default:
         if (component.name != null) yield component;

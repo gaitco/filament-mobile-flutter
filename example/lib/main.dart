@@ -2,6 +2,7 @@ import 'package:filament_mobile/filament_mobile.dart';
 import 'package:flutter/material.dart';
 
 import 'http_filament_transport.dart';
+import 'in_memory_schema_cache.dart';
 
 /// A minimal host: index -> list -> record, over real HTTP, no styling of
 /// its own — `MaterialPanelStateBuilder`'s default is what's on screen.
@@ -75,6 +76,14 @@ class _PanelHomeState extends State<PanelHome> {
       baseUrl: widget.baseUrl,
       token: () => widget.token,
     ),
+    cache: InMemorySchemaCache(),
+    // Scoped to the token, not a constant: `/schema` is per-user, so a
+    // shared key would let a second signed-in user on this device open the
+    // first user's cached panel index — see FilamentSchemaCache's doc
+    // comment. The token is this example's only stand-in for "who's signed
+    // in" (there is no separate user id here); a real host keys off its own
+    // user id or a hash of the token instead of the bearer token itself.
+    cacheKey: widget.token,
   );
   late final PanelProvider _panelProvider = PanelProvider(_source);
 
@@ -98,6 +107,28 @@ class _PanelHomeState extends State<PanelHome> {
               source: _source,
               resource: resource,
               id: record.id,
+            ),
+            // `onLinkTap` makes a rich-text link tappable — this package
+            // takes no URL-launcher dependency, so opening it is entirely
+            // the host's call. This example has no such dependency either,
+            // so it echoes the href instead of opening it; a host wiring a
+            // real `url_launcher` call goes here.
+            registry: EntryRegistry.defaults(
+              onLinkTap: (href) => ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(SnackBar(content: Text('Link tapped: $href'))),
+            ),
+            onSeeAllTap: (relation, recordId) => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => RelationListScreen(
+                  provider: RelationListProvider(
+                    source: _source,
+                    resourceKey: resource.key,
+                    id: recordId,
+                    relation: relation,
+                  ),
+                ),
+              ),
             ),
           ),
         ),

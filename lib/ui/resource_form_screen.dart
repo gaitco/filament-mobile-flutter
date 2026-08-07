@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../form/field_registry.dart';
 import '../form/field_state.dart';
+import '../ports/filament_file_picker.dart';
 import '../ports/filament_strings.dart';
 import '../ports/panel_view_state.dart';
 import '../schema/schema_component.dart';
@@ -19,6 +20,7 @@ class ResourceFormScreen extends StatefulWidget {
     this.registry,
     this.stateBuilder,
     this.strings = const FilamentStrings(),
+    this.filePicker,
     super.key,
   });
 
@@ -26,6 +28,12 @@ class ResourceFormScreen extends StatefulWidget {
   final FieldRegistry? registry;
   final PanelBodyBuilder? stateBuilder;
   final FilamentStrings strings;
+
+  /// Lets the host wire in whatever file-picker plugin it uses. Null keeps
+  /// every file field read-only and rendering
+  /// [FilamentStrings.filePickerUnavailable] — see [FilamentFilePicker]'s doc
+  /// for why that beats a control the host cannot actually drive.
+  final FilamentFilePicker? filePicker;
 
   @override
   State<ResourceFormScreen> createState() => _ResourceFormScreenState();
@@ -53,9 +61,12 @@ class _ResourceFormScreenState extends State<ResourceFormScreen> {
 
     return ListenableBuilder(
       listenable: widget.provider,
-      builder: (context, _) => Scaffold(
-        appBar: AppBar(title: Text(widget.provider.resource.labels.singular)),
-        body: builder(context, _state(context)),
+      builder: (context, _) => withPanelDirection(
+        widget.provider.resource.direction,
+        Scaffold(
+          appBar: AppBar(title: Text(widget.provider.resource.labels.singular)),
+          body: builder(context, _state(context)),
+        ),
       ),
     );
   }
@@ -158,11 +169,20 @@ class _ResourceFormScreenState extends State<ResourceFormScreen> {
           value: provider.values[name],
           onChanged: (value) => provider.change(name, value),
           error: provider.fieldErrors[name],
+          // Only a RepeaterComponent looks past its own key, to place a
+          // row's own error on that row rather than folding it into one
+          // message for the whole field.
+          errors: provider.fieldErrors,
           enabled: !component.disabled && component.writable,
           // Only where `/schema` withheld the options. Every other field
           // ignores it, and a host that registers its own builder is free to
           // as well.
           searchOptions: (query) => provider.searchOptions(name, query),
+          // File-only, same story: every other field ignores both.
+          filePicker: widget.filePicker,
+          uploadFile: ({required bytes, required filename}) =>
+              provider.uploadFile(name, bytes: bytes, filename: filename),
+          strings: widget.strings,
         ),
       ),
     );

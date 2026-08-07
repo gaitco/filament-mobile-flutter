@@ -29,8 +29,12 @@ SchemaComponent selectField(String name, {required Object? defaultValue}) {
   }, 'test');
 }
 
-SchemaComponent fileField(String name) {
-  return SchemaComponent.fromJson({'type': 'file', 'name': name}, 'test');
+SchemaComponent fileField(String name, {bool readOnly = true}) {
+  return SchemaComponent.fromJson({
+    'type': 'file',
+    'name': name,
+    'config': {'readOnly': readOnly},
+  }, 'test');
 }
 
 /// A leaf with no `name` at all — the contract allows it (a component that
@@ -147,13 +151,27 @@ void main() {
       expect(values.payloadFor(components).containsKey('secret'), isFalse);
     });
 
-    test('omits a file field, which the server never writes', () {
+    test('omits a read-only file field — the server has nowhere for its '
+        'value to go', () {
       final components = [textField('name'), fileField('avatar')];
       final values = FormValues.initial(
         components,
       ).set('avatar', 'attacker.jpg');
 
       expect(values.payloadFor(components).containsKey('avatar'), isFalse);
+    });
+
+    test('includes a writable file field\'s value — by submit time it is '
+        'the path /upload already returned, not free text', () {
+      final components = [
+        textField('name'),
+        fileField('avatar', readOnly: false),
+      ];
+      final values = FormValues.initial(
+        components,
+      ).set('avatar', 'avatars/1/photo.png');
+
+      expect(values.payloadFor(components)['avatar'], 'avatars/1/photo.png');
     });
 
     test('omits every field nested inside a hidden container', () {

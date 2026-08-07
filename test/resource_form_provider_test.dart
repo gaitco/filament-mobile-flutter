@@ -1,4 +1,5 @@
 import 'package:filament_mobile/data/resource_record.dart';
+import 'package:filament_mobile/data/upload_result.dart';
 import 'package:filament_mobile/data/write_result.dart';
 import 'package:filament_mobile/ports/filament_strings.dart';
 import 'package:filament_mobile/ports/filament_transport.dart';
@@ -382,6 +383,60 @@ void main() {
       expect(provider.fieldErrors['name'], 'الاسم مستخدم بالفعل');
     });
 
+    /// P6c close-out re-review. A nested repeater is inert (the server
+    /// publishes it `readOnly: true`), but its rows still travel inside the
+    /// editable OUTER repeater's value, so the server can still 422 on
+    /// `outer_rows.0.inner_rows.0.x`. That key used to be mapped — its first
+    /// segment IS an editable repeater on screen — and then rendered nowhere:
+    /// `RepeaterFieldWidget` keys errors as `<name>.<index>.<child>`, three
+    /// segments, so nothing could look a five-segment key up, and the banner
+    /// never saw it. Save did nothing and said nothing.
+    test(
+      'a 422 keyed deeper than one row reaches the banner, not a map nothing renders',
+      () async {
+        final source = FakeSource(
+          components: nestedRepeaterForm(),
+          writeResult: const WriteInvalid({
+            'outer_rows.0.inner_rows.0.x': ['Nested row is invalid.'],
+          }),
+        );
+        final provider = providerFor(source);
+        await provider.load();
+
+        expect(await provider.submit(), isFalse);
+        expect(provider.formError, contains('Nested row is invalid.'));
+        expect(
+          provider.fieldErrors,
+          isEmpty,
+          reason: 'no widget can key a five-segment path',
+        );
+      },
+    );
+
+    /// The other half, and the claim the three-segment rule rests on: an
+    /// ordinary per-item key still lands on the field. LAYOUT nesting inside
+    /// an item template does not lengthen Laravel's key — a `Section`-wrapped
+    /// child is still `<repeater>.<index>.<child>` (pinned server-side in
+    /// `RepeaterRulesTest`) — so this is the depth the widget renders and the
+    /// only depth it can.
+    test(
+      'a 422 keyed at exactly one row still lands on the row field',
+      () async {
+        final source = FakeSource(
+          components: nestedRepeaterForm(),
+          writeResult: const WriteInvalid({
+            'outer_rows.0.note': ['Row is invalid.'],
+          }),
+        );
+        final provider = providerFor(source);
+        await provider.load();
+
+        expect(await provider.submit(), isFalse);
+        expect(provider.fieldErrors['outer_rows.0.note'], 'Row is invalid.');
+        expect(provider.formError, isNull);
+      },
+    );
+
     test('a 422 key matching no field reaches the form banner', () async {
       // Never dropped. An unmappable error the user cannot see is how a form
       // becomes unsubmittable with no explanation.
@@ -486,5 +541,99 @@ void main() {
       expect(provider.formError, isNull);
       expect(provider.submitting, isFalse);
     });
+  });
+
+  group('uploadFile', () {
+    test('success sets the field value', () async {
+      final source = FakeSource(
+        components: fileForm(),
+        uploadResult: const UploadSuccess('photos/new.png'),
+      );
+      final provider = providerFor(source);
+      await provider.load();
+
+      await provider.uploadFile(
+        'photo',
+        bytes: const [1, 2, 3],
+        filename: 'me.png',
+      );
+
+      expect(provider.values['photo'], 'photos/new.png');
+    });
+
+    test(
+      'a success landing after dispose is dropped, not an assertion',
+      () async {
+        // The user backs out of the form while the upload is in flight —
+        // seconds of window on mobile. Both failure branches were already
+        // disposal-guarded; success routed through change(), whose bare
+        // notifyListeners() asserts on a disposed ChangeNotifier and
+        // propagates out of the widget's un-awaited call.
+        final source = FakeSource(
+          components: fileForm(),
+          uploadResult: const UploadSuccess('photos/new.png'),
+        );
+        final provider = providerFor(source);
+        await provider.load();
+
+        source.holdNextUpload();
+        final upload = provider.uploadFile(
+          'photo',
+          bytes: const [1],
+          filename: 'x.png',
+        );
+        provider.dispose();
+        source.completeHeldUpload();
+
+        await upload; // must complete without throwing
+      },
+    );
+
+    // Same routing rule `submit()`'s own `_applyServerErrors` follows for a
+    // write's 422: a field-shaped refusal goes on the field, everything else
+    // goes on the banner — tested in both directions.
+    test('a 422 lands the message on the field, not the banner', () async {
+      final source = FakeSource(
+        components: fileForm(),
+        uploadResult: const UploadFailed('Too large.', statusCode: 422),
+      );
+      final provider = providerFor(source);
+      await provider.load();
+
+      await provider.uploadFile('photo', bytes: const [1], filename: 'x.png');
+
+      expect(provider.fieldErrors['photo'], 'Too large.');
+      expect(provider.formError, isNull);
+    });
+
+    test('a non-422 failure reaches the banner, not the field', () async {
+      final source = FakeSource(
+        components: fileForm(),
+        uploadResult: const UploadFailed('Server exploded.', statusCode: 500),
+      );
+      final provider = providerFor(source);
+      await provider.load();
+
+      await provider.uploadFile('photo', bytes: const [1], filename: 'x.png');
+
+      expect(provider.formError, 'Server exploded.');
+      expect(provider.fieldErrors.containsKey('photo'), isFalse);
+    });
+
+    test(
+      'a banner-bound failure with no message falls back to strings.uploadFailed',
+      () async {
+        final source = FakeSource(
+          components: fileForm(),
+          uploadResult: const UploadFailed(null, statusCode: 500),
+        );
+        final provider = providerFor(source);
+        await provider.load();
+
+        await provider.uploadFile('photo', bytes: const [1], filename: 'x.png');
+
+        expect(provider.formError, const FilamentStrings().uploadFailed);
+      },
+    );
   });
 }

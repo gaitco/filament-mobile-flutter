@@ -7,9 +7,11 @@ import '../data/resource_record.dart';
 import '../data/write_result.dart';
 import '../ports/filament_strings.dart';
 import '../ports/panel_view_state.dart';
+import '../schema/relation_descriptor.dart';
 import '../state/resource_view_provider.dart';
 import 'entry_registry.dart';
 import 'material_panel_state_builder.dart';
+import 'relation_section_widget.dart';
 import 'semantic_badge.dart';
 
 /// One record's infolist.
@@ -23,6 +25,7 @@ class ResourceViewScreen extends StatefulWidget {
     this.stateBuilder,
     this.strings = const FilamentStrings(),
     this.onEditTap,
+    this.onSeeAllTap,
     super.key,
   });
 
@@ -33,10 +36,14 @@ class ResourceViewScreen extends StatefulWidget {
 
   /// Called with the loaded record when the edit affordance is tapped. The
   /// screen owns no edit form of its own — same division as the list
-  /// screen's `onRecordTap` — so a host that never wires this up gets a
-  /// button that renders (once the record permits it) but does nothing on
-  /// tap.
+  /// screen's `onRecordTap` — so a host that never wires this up gets no
+  /// edit button at all, never one that renders and silently no-ops on tap.
   final void Function(ResourceRecord record)? onEditTap;
+
+  /// Forwarded to every `RelationSectionWidget`'s `onSeeAllTap` — see that
+  /// widget's doc. Task 8 builds the screen this opens.
+  final void Function(RelationDescriptor relation, Object recordId)?
+  onSeeAllTap;
 
   @override
   State<ResourceViewScreen> createState() => _ResourceViewScreenState();
@@ -63,12 +70,15 @@ class _ResourceViewScreenState extends State<ResourceViewScreen> {
 
     return ListenableBuilder(
       listenable: widget.provider,
-      builder: (context, _) => Scaffold(
-        appBar: AppBar(
-          title: Text(widget.provider.resource.labels.singular),
-          actions: _actions(),
+      builder: (context, _) => withPanelDirection(
+        widget.provider.resource.direction,
+        Scaffold(
+          appBar: AppBar(
+            title: Text(widget.provider.resource.labels.singular),
+            actions: _actions(),
+          ),
+          body: builder(context, _state(context)),
         ),
-        body: builder(context, _state(context)),
       ),
     );
   }
@@ -113,8 +123,28 @@ class _ResourceViewScreenState extends State<ResourceViewScreen> {
       children: [
         for (final component in widget.provider.resource.infolist)
           _registry.build(context, component, record),
+        ..._relationSections(record),
       ],
     );
+  }
+
+  /// One section per relation the server published for this resource — see
+  /// `RelationDescriptor`. Always rendered when the resource carries one: a
+  /// published relation needs nothing wired to appear, the same read path
+  /// `_infolist` above already uses for the record itself.
+  List<Widget> _relationSections(ResourceRecord record) {
+    return [
+      for (final relation in widget.provider.resource.relations)
+        RelationSectionWidget(
+          key: ValueKey('relation.${relation.key}'),
+          relation: relation,
+          recordId: record.id,
+          fetch: ({int page = 1}) =>
+              widget.provider.loadRelation(relation, page: page),
+          strings: widget.strings,
+          onSeeAllTap: widget.onSeeAllTap,
+        ),
+    ];
   }
 
   /// The edit and delete affordances, both gated on the **record**'s
@@ -131,7 +161,10 @@ class _ResourceViewScreenState extends State<ResourceViewScreen> {
     if (record == null) return const [];
 
     return [
-      if (recordCan(record, 'update'))
+      // `onEditTap != null` is part of the gate, not just the handler: a
+      // host that never wired it must get no button, never one that renders
+      // enabled and silently no-ops on tap.
+      if (recordCan(record, 'update') && widget.onEditTap != null)
         IconButton(
           key: const ValueKey('record.edit'),
           icon: const Icon(Icons.edit_outlined),
@@ -160,21 +193,31 @@ class _ResourceViewScreenState extends State<ResourceViewScreen> {
   }
 
   Future<void> _confirmDelete() async {
+    // NOT `Directionality.of(context)` — this `State`'s own `context` is an
+    // ANCESTOR of the `Directionality` `build()` wraps around the
+    // `Scaffold`, not a descendant of it; see `textDirectionOf`'s doc
+    // (`material_panel_state_builder.dart`). Resolved from the schema value
+    // directly instead.
+    final direction = textDirectionOf(widget.provider.resource.direction);
+
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(widget.strings.deleteConfirmTitle),
-        content: Text(widget.strings.deleteConfirmBody),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: Text(widget.strings.cancel),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: Text(widget.strings.deleteConfirm),
-          ),
-        ],
+      builder: (dialogContext) => Directionality(
+        textDirection: direction,
+        child: AlertDialog(
+          title: Text(widget.strings.deleteConfirmTitle),
+          content: Text(widget.strings.deleteConfirmBody),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(widget.strings.cancel),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text(widget.strings.deleteConfirm),
+            ),
+          ],
+        ),
       ),
     );
     if (confirmed != true || !mounted) return;
@@ -208,31 +251,37 @@ class _ResourceViewScreenState extends State<ResourceViewScreen> {
     final confirmation = action.confirmation;
 
     if (confirmation != null) {
+      // See `_confirmDelete`'s doc — same reason, not `Directionality.of`.
+      final direction = textDirectionOf(widget.provider.resource.direction);
+
       final confirmed = await showDialog<bool>(
         context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: Text(confirmation.heading),
-          content: confirmation.description == null
-              ? null
-              : Text(confirmation.description!),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: Text(
-                confirmation.cancel.isEmpty
-                    ? widget.strings.cancel
-                    : confirmation.cancel,
+        builder: (dialogContext) => Directionality(
+          textDirection: direction,
+          child: AlertDialog(
+            title: Text(confirmation.heading),
+            content: confirmation.description == null
+                ? null
+                : Text(confirmation.description!),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: Text(
+                  confirmation.cancel.isEmpty
+                      ? widget.strings.cancel
+                      : confirmation.cancel,
+                ),
               ),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: Text(
-                confirmation.submit.isEmpty
-                    ? widget.strings.actionConfirm
-                    : confirmation.submit,
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: Text(
+                  confirmation.submit.isEmpty
+                      ? widget.strings.actionConfirm
+                      : confirmation.submit,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       );
 
@@ -268,6 +317,19 @@ class _ResourceViewScreenState extends State<ResourceViewScreen> {
   }
 
   void _showMessage(String message) {
+    // No `Directionality` wrap here, unlike the dialogs above, and measured
+    // rather than assumed: a `SnackBar` is NOT an overlay route. The
+    // `ScaffoldMessenger` hands it to the nearest registered `Scaffold`,
+    // which renders it inside its own stack — below the `withPanelDirection`
+    // wrap `build()` puts around that `Scaffold`. It inherits the panel's
+    // direction on its own.
+    //
+    // The whole-branch review listed a wrap here as unpinned wiring; it was
+    // in fact dead code — deleting it changed nothing measurable, because
+    // nothing was broken to begin with. `rtl_layout_test.dart` asserts the
+    // rendered snack bar's resolved direction directly, so if this ever
+    // stops being true (a snack bar promoted to a route, or the wrap moved
+    // above the `Scaffold`) the test says so.
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));

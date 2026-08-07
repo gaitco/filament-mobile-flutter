@@ -11,6 +11,7 @@ part 'components/select_component.dart';
 part 'components/boolean_component.dart';
 part 'components/date_component.dart';
 part 'components/file_component.dart';
+part 'components/repeater_component.dart';
 part 'components/layout_component.dart';
 part 'components/entry_component.dart';
 
@@ -115,6 +116,7 @@ sealed class SchemaComponent extends Equatable {
       'toggle' || 'checkbox' => BooleanComponent._fromJson(json, common),
       'date' || 'datetime' => DateComponent._fromJson(json, common, path),
       'file' => FileComponent._fromJson(json, common, path),
+      'repeater' => RepeaterComponent._fromJson(json, common, path, depth),
       'section' ||
       'grid' ||
       'tabs' ||
@@ -123,7 +125,8 @@ sealed class SchemaComponent extends Equatable {
       'badge_entry' ||
       'image_entry' ||
       'boolean_entry' ||
-      'date_entry' => EntryComponent._fromJson(json, common, path),
+      'date_entry' ||
+      'rich_entry' => EntryComponent._fromJson(json, common, path),
       _ => UnknownComponent._fromJson(json, common, path, depth),
     };
   }

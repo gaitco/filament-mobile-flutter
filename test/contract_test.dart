@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:filament_mobile/dashboard/dashboard_data.dart';
 import 'package:filament_mobile/schema/panel_schema.dart';
 import 'package:filament_mobile/schema/schema_component.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -160,6 +161,11 @@ void main() {
 
       expect(nodes, isNotEmpty);
       expect(
+        // `rich_entry` used to be excluded here by exact name: P6e Task 2
+        // added it to the Laravel walker ahead of the Dart parser/renderer,
+        // so it genuinely degraded through UnknownComponent until Task 5
+        // shipped both. No exclusion needed any more — `rich_entry` parses
+        // as an EntryComponent now, same as every other entry type.
         nodes.whereType<UnknownComponent>().map((n) => n.type),
         isEmpty,
         reason: 'an UnknownComponent is skipped entirely in release builds',
@@ -272,6 +278,45 @@ void main() {
       final grouped = panel.resources.where((r) => r.group != null);
 
       expect(grouped, isNotEmpty);
+    });
+  });
+
+  group('contract/dashboard.json', () {
+    // The dashboard's own half of the loop: nothing else feeds a real
+    // dashboard payload — hit through Task 2's endpoint, not hand-built —
+    // to the Dart parser.
+    late DashboardData dashboard;
+
+    setUp(() => dashboard = DashboardData.fromJson(fixture('dashboard.json')));
+
+    // Fixture VALUES, not just types: `isA<String>` on a `String` field can
+    // never fail, so a server-side rename would regenerate the snapshot,
+    // silently null the field in Dart, and leave both suites green — exactly
+    // the drift this fixture exists to catch.
+    test('parses the stats widget with every published field intact', () {
+      final stats = dashboard.widgets.whereType<StatsWidgetData>().single;
+
+      expect(stats.heading, 'Store overview');
+      expect(stats.description, 'Orders at a glance');
+
+      final withChart = stats.stats.firstWhere((stat) => stat.chart != null);
+
+      expect(withChart.label, 'Orders this week');
+      expect(withChart.value, '1340');
+      expect(withChart.description, '12% increase');
+      expect(withChart.descriptionIcon, 'heroicon-m-arrow-trending-up');
+      expect(withChart.color, 'success');
+      expect(withChart.chart, [7.0, 12.0, 9.0, 15.0, 22.0]);
+    });
+
+    test('parses the chart widget with every published field intact', () {
+      final chart = dashboard.widgets.whereType<ChartWidgetData>().single;
+
+      expect(chart.heading, 'Revenue');
+      expect(chart.chartType, 'line');
+      expect(chart.labels, ['Jan', 'Feb', 'Mar']);
+      expect(chart.datasets.single.label, 'Revenue');
+      expect(chart.datasets.single.data, [120.0, 340.0, 210.0]);
     });
   });
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/resource_record.dart';
 import '../schema/card_layout.dart';
+import 'bidi_text.dart';
 import 'semantic_badge.dart';
 
 /// One record as a list card — the mobile answer to Filament's data table.
@@ -25,8 +26,8 @@ class ResourceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final title = _text(layout.titleField);
-    final subtitle = _text(layout.subtitleField);
+    final title = _text(layout.titleField, context);
+    final subtitle = _text(layout.subtitleField, context);
 
     return Card(
       child: InkWell(
@@ -58,7 +59,8 @@ class ResourceCard extends StatelessWidget {
                         spacing: 6,
                         children: [
                           for (final badge in layout.badges)
-                            if (_text(badge.field) case final value?)
+                            if (_text(badge.field, context, isolate: false)
+                                case final value?)
                               SemanticBadge(value: value, colors: badge.colors),
                         ],
                       ),
@@ -66,7 +68,8 @@ class ResourceCard extends StatelessWidget {
                     if (layout.meta.isNotEmpty) ...[
                       const SizedBox(height: 4),
                       for (final meta in layout.meta)
-                        if (_text(meta.field, context) case final value?)
+                        if (_text(meta.field, context, formatDates: true)
+                            case final value?)
                           Text(value, style: theme.textTheme.labelSmall),
                     ],
                   ],
@@ -79,25 +82,61 @@ class ResourceCard extends StatelessWidget {
     );
   }
 
-  String? _text(String? field, [BuildContext? context]) {
+  /// [formatDates] gates the ISO-8601 → localised-short-date rewrite below —
+  /// today only the caller passing `meta` sets it, preserving the pre-P6f
+  /// behaviour exactly (a title/subtitle/badge holding a timestamp-shaped
+  /// string prints it raw, same as always). [context] is unconditional
+  /// regardless of that flag: every returned string still needs it to
+  /// resolve the ambient [Directionality] for [isolateGroupedDigits].
+  ///
+  /// [isolate] defaults to true and is set false only by the badge caller:
+  /// a badge's value is about to become [SemanticBadge]'s colour-lookup key,
+  /// and isolating it here first would isolate the *key* before the lookup
+  /// runs, breaking `colors[value]` for any value that matches the
+  /// grouped-digit pattern (fix round 1, finding 1). `SemanticBadge` isolates
+  /// its own displayed text after doing that lookup on the raw value.
+  String? _text(
+    String? field,
+    BuildContext context, {
+    bool formatDates = false,
+    bool isolate = true,
+  }) {
     if (field == null) return null;
-    final value = record.get<Object>(field);
 
-    if (value == null) return null;
+    String raw;
 
-    // A timestamp arrives as raw ISO 8601 — `2026-03-24T08:41:19.000000Z` —
-    // and printing it verbatim puts LTR digits and a `T` in the middle of an
-    // RTL card. `MaterialLocalizations` formats it in the app's own locale
-    // with no new dependency, which is why this needs no `intl`.
-    if (context != null) {
-      final date = _asDate(value);
+    // A rich column publishes its plain text on a flat sibling key,
+    // `<field>.__rich.text` (design spec, "Cards") — read that instead of
+    // the raw markup the base field still holds. Absent sibling means
+    // nothing to convert (or a `->prose()`-only entry, which `index()` never
+    // resolves), and falls through to the raw value below like any other
+    // field.
+    if (record.get<Map<String, dynamic>>('$field.__rich') case {
+      'text': final String text,
+    }) {
+      raw = text;
+    } else {
+      final value = record.get<Object>(field);
 
-      if (date != null) {
-        return MaterialLocalizations.of(context).formatShortDate(date);
-      }
+      if (value == null) return null;
+
+      // A timestamp arrives as raw ISO 8601 — `2026-03-24T08:41:19.000000Z` —
+      // and printing it verbatim puts LTR digits and a `T` in the middle of an
+      // RTL card. `MaterialLocalizations` formats it in the app's own locale
+      // with no new dependency, which is why this needs no `intl`.
+      final date = formatDates ? _asDate(value) : null;
+
+      raw = date != null
+          ? MaterialLocalizations.of(context).formatShortDate(date)
+          : value.toString();
     }
 
-    return value.toString();
+    if (!isolate) return raw;
+
+    // Grouped digits (a phone number, a spaced IBAN, a hyphenated tax
+    // number) reverse inside an RTL card otherwise — see `bidi_text.dart`.
+    // A no-op under LTR and on plain prose with no such run.
+    return isolateGroupedDigits(raw, Directionality.of(context));
   }
 
   /// An ISO-8601 timestamp, or null for anything else.

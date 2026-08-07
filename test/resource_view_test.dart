@@ -1,14 +1,18 @@
+import 'package:filament_mobile/dashboard/dashboard_data.dart';
 import 'package:filament_mobile/data/action_result.dart';
 import 'package:filament_mobile/data/paginated_records.dart';
 import 'package:filament_mobile/data/resource_data_source.dart';
 import 'package:filament_mobile/data/resource_record.dart';
+import 'package:filament_mobile/data/upload_result.dart';
 import 'package:filament_mobile/data/write_result.dart';
 import 'package:filament_mobile/ports/filament_transport.dart';
 import 'package:filament_mobile/schema/panel_schema.dart';
+import 'package:filament_mobile/schema/relation_descriptor.dart';
 import 'package:filament_mobile/schema/resource_schema.dart';
 import 'package:filament_mobile/schema/schema_component.dart';
 import 'package:filament_mobile/state/load_status.dart';
 import 'package:filament_mobile/state/resource_view_provider.dart';
+import 'package:filament_mobile/ui/relation_section_widget.dart';
 import 'package:filament_mobile/ui/resource_view_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:filament_mobile/data/options_page.dart';
@@ -27,11 +31,22 @@ class FakeSource implements ResourceDataSource {
     this.deleteResult = const WriteSuccess({}),
     this.recordActions = const [],
     this.actionResult = const ActionSuccess(null),
+    this.relationResult,
+    this.relationError,
   });
 
   final Object? error;
   final Map<String, dynamic> recordPermissions;
   final WriteResult deleteResult;
+
+  /// What `relation()` resolves to. Null (the default, like every other
+  /// method here a test doesn't touch) makes it throw — a test that never
+  /// queues a relation response never expects one fetched.
+  final PaginatedRecords? relationResult;
+  final Object? relationError;
+
+  final List<({String resourceKey, Object id, String relationKey, int page})>
+  relationCalls = [];
 
   /// Raw action entries, parsed the same way the server payload is —
   /// `ResourceRecord.fromJson`'s own `actions` param, not a `RecordAction`
@@ -76,6 +91,9 @@ class FakeSource implements ResourceDataSource {
   Future<PanelSchema> panel() async => throw UnimplementedError();
 
   @override
+  Future<PanelSchema?> cachedPanel() async => null;
+
+  @override
   Future<PaginatedRecords> list(
     String resourceKey, {
     int page = 1,
@@ -83,6 +101,24 @@ class FakeSource implements ResourceDataSource {
     String? sort,
     String? direction,
   }) async => throw UnimplementedError();
+
+  @override
+  Future<PaginatedRecords> relation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation, {
+    int page = 1,
+  }) async {
+    relationCalls.add((
+      resourceKey: resourceKey,
+      id: id,
+      relationKey: relation.key,
+      page: page,
+    ));
+    if (relationError != null) throw relationError!;
+    if (relationResult == null) throw UnimplementedError();
+    return relationResult!;
+  }
 
   @override
   Future<WriteResult> create(String resourceKey, Map<String, dynamic> values) =>
@@ -115,27 +151,44 @@ class FakeSource implements ResourceDataSource {
     required Map<String, dynamic> values,
     required String changed,
   }) => throw UnimplementedError();
+
+  @override
+  Future<DashboardData> dashboard() => throw UnimplementedError();
+
+  @override
+  Future<UploadResult> uploadFile(
+    String resourceKey,
+    String field, {
+    required List<int> bytes,
+    required String filename,
+  }) => throw UnimplementedError();
 }
 
 /// [permissions] is the **resource**-level block ("this resource supports
 /// deletion"). The record's own block is set separately, via
 /// [FakeSource.recordPermissions] — the two are never the same map.
-ResourceSchema _resourceWith(Map<String, bool> permissions) =>
-    ResourceSchema.fromJson({
-      'key': 'users',
-      'labels': {'singular': 'مستخدم', 'plural': 'المستخدمون'},
-      'recordKey': 'id',
-      'permissions': permissions,
-      'infolist': [
-        {'type': 'text_entry', 'name': 'name', 'label': 'الاسم'},
-        {'type': 'boolean_entry', 'name': 'is_active', 'label': 'نشط'},
-      ],
-    }, 'r');
+/// [relations] is the raw wire shape (`RelationDescriptor.fromJson` parses
+/// it), empty by default like every other resource in this file.
+ResourceSchema _resourceWith(
+  Map<String, bool> permissions, {
+  List<Map<String, dynamic>> relations = const [],
+}) => ResourceSchema.fromJson({
+  'key': 'users',
+  'labels': {'singular': 'مستخدم', 'plural': 'المستخدمون'},
+  'recordKey': 'id',
+  'permissions': permissions,
+  'relations': relations,
+  'infolist': [
+    {'type': 'text_entry', 'name': 'name', 'label': 'الاسم'},
+    {'type': 'boolean_entry', 'name': 'is_active', 'label': 'نشط'},
+  ],
+}, 'r');
 
 Widget viewHarness({
   FakeSource? source,
   Map<String, bool> resourcePermissions = const {'delete': true},
   Map<String, bool>? recordPermissions,
+  List<Map<String, dynamic>> relations = const [],
 }) {
   final resolvedSource =
       source ?? FakeSource(recordPermissions: recordPermissions ?? const {});
@@ -144,7 +197,7 @@ Widget viewHarness({
     home: ResourceViewScreen(
       provider: ResourceViewProvider(
         source: resolvedSource,
-        resource: _resourceWith(resourcePermissions),
+        resource: _resourceWith(resourcePermissions, relations: relations),
         id: 1,
       ),
     ),
@@ -675,5 +728,109 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.text('أحمد'), findsOneWidget);
     });
+  });
+
+  group('relation sections', () {
+    // Wire shape taken from the real BannerResource fixture — see
+    // relation_descriptor_test.dart.
+    const tagsRelation = {
+      'key': 'tags',
+      'label': 'Tags',
+      'card': {
+        'title': {'field': 'name'},
+      },
+    };
+
+    testWidgets('a published relation renders as a section with its rows', (
+      tester,
+    ) async {
+      final source = FakeSource(
+        relationResult: PaginatedRecords(
+          records: [
+            ResourceRecord.fromJson(const {'id': 1, 'name': 'Sale'}, 'id'),
+          ],
+          meta: const PageMeta(
+            currentPage: 1,
+            lastPage: 1,
+            perPage: 15,
+            total: 1,
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(
+        viewHarness(source: source, relations: const [tagsRelation]),
+      );
+      await pumpUntilFound(tester, find.text('Sale'));
+
+      expect(find.text('Tags'), findsOneWidget);
+      // Proves the screen wired the RIGHT relation and record through —
+      // `resource.key`/`record.id` are not hardcoded onto some other value.
+      expect(source.relationCalls.single.resourceKey, 'users');
+      expect(source.relationCalls.single.id, 1);
+      expect(source.relationCalls.single.relationKey, 'tags');
+    });
+
+    testWidgets(
+      'a published relation with zero rows shows an empty state, not an '
+      'absent section',
+      (tester) async {
+        // Absence means the server did not publish the relation — see the
+        // next test. Zero rows means it did, and this is what proves the two
+        // still don't look the same once the fetch is wired inside the
+        // package rather than by a host closure.
+        final source = FakeSource(
+          relationResult: const PaginatedRecords(
+            records: [],
+            meta: PageMeta(currentPage: 1, lastPage: 1, perPage: 15, total: 0),
+          ),
+        );
+
+        await tester.pumpWidget(
+          viewHarness(source: source, relations: const [tagsRelation]),
+        );
+        await pumpUntilFound(
+          tester,
+          find.byKey(const ValueKey('relation.empty')),
+        );
+
+        expect(find.text('Tags'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'a resource with no published relations renders no relation section '
+      'at all',
+      (tester) async {
+        await tester.pumpWidget(viewHarness());
+        await pumpUntilFound(tester, find.text('أحمد'));
+
+        expect(find.byType(RelationSectionWidget), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'a failed relation load degrades to a message at the screen, not an '
+      'infinite spinner',
+      (tester) async {
+        // The HANDOFF pilot's permanent-spinner bug was a SCREEN, not a
+        // widget in isolation — this is that lesson proven at the same
+        // granularity, using FakeSource.relationError rather than the
+        // widget-level fetch throw relation_section_test.dart already covers.
+        final source = FakeSource(relationError: StateError('boom'));
+
+        await tester.pumpWidget(
+          viewHarness(source: source, relations: const [tagsRelation]),
+        );
+        await pumpUntilFound(
+          tester,
+          find.byKey(const ValueKey('relation.failed')),
+        );
+
+        expect(find.text('Tags'), findsOneWidget);
+        expect(find.text('Could not load'), findsOneWidget);
+        expect(find.byType(CircularProgressIndicator), findsNothing);
+      },
+    );
   });
 }

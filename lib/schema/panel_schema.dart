@@ -4,6 +4,7 @@ import 'json_reader.dart';
 import 'resource_schema.dart';
 
 export 'json_reader.dart' show SchemaFormatException;
+export 'resource_schema.dart' show PanelDirection;
 
 /// Thrown when the server speaks a newer contract than this build understands.
 ///
@@ -63,6 +64,8 @@ class PanelSchema extends Equatable {
     required this.version,
     required this.id,
     required this.title,
+    this.locale = '',
+    this.direction = PanelDirection.ltr,
     this.navigation = const [],
     this.resources = const [],
   });
@@ -80,6 +83,10 @@ class PanelSchema extends Equatable {
 
     final panel = req<Map<String, dynamic>>(json, 'panel', '');
     final navigationNodes = objects(panel, 'navigation', 'panel');
+    // Absent reads as ltr (a server predating this field), and so does an
+    // unrecognised value — the server normalises `direction` to ltr/rtl, but
+    // the client re-checks rather than trusting that it did.
+    final direction = PanelDirection.fromJson(panel['direction']);
 
     // Read directly rather than through objects(): the resources array is at
     // the document root, so its children must report `resources[0]`, not
@@ -110,6 +117,8 @@ class PanelSchema extends Equatable {
       version: version,
       id: req<String>(panel, 'id', 'panel'),
       title: req<String>(panel, 'title', 'panel'),
+      locale: opt<String>(panel, 'locale') ?? '',
+      direction: direction,
       navigation: List.generate(
         navigationNodes.length,
         (index) => NavigationGroup.fromJson(
@@ -117,10 +126,16 @@ class PanelSchema extends Equatable {
           'panel.navigation[$index]',
         ),
       ),
+      // One value, one source: the panel's direction is propagated into
+      // every resource here, at parse time, rather than threaded through the
+      // host at render time. See PanelDirection's doc comment.
       resources: List.generate(
         resourceNodes.length,
-        (index) =>
-            ResourceSchema.fromJson(resourceNodes[index], 'resources[$index]'),
+        (index) => ResourceSchema.fromJson(
+          resourceNodes[index],
+          'resources[$index]',
+          direction: direction,
+        ),
       ),
     );
   }
@@ -131,6 +146,15 @@ class PanelSchema extends Equatable {
   final int version;
   final String id;
   final String title;
+
+  /// `app()->getLocale()` at request time, published for a client that wants
+  /// it for its own formatting. Not used by this package to decide
+  /// [direction] — that is read from its own key, independently.
+  final String locale;
+
+  /// The panel's layout direction. Absent or unrecognised reads as
+  /// [PanelDirection.ltr] — see [PanelDirection.fromJson].
+  final PanelDirection direction;
   final List<NavigationGroup> navigation;
   final List<ResourceSchema> resources;
 

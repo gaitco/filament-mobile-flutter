@@ -11,7 +11,11 @@ import 'package:http/http.dart' as http;
 /// GET's body, throw on its failure, and pass a write's status straight
 /// through. See [FilamentTransport]'s own doc comment for why writes and
 /// reads are asymmetric.
-class HttpFilamentTransport implements FilamentTransport {
+class HttpFilamentTransport
+    implements
+        FilamentTransport,
+        FilamentUploadTransport,
+        FilamentConditionalTransport {
   HttpFilamentTransport({
     required this.baseUrl,
     required this.token,
@@ -59,6 +63,40 @@ class HttpFilamentTransport implements FilamentTransport {
   }
 
   @override
+  Future<ConditionalResponse> getConditional(
+    String path, {
+    String? etag,
+  }) async {
+    // Deliberately not routed through get(): get() throws on every non-2xx,
+    // and a 304 is one — it would arrive there as an indistinguishable
+    // thrown failure instead of the "unchanged" outcome the caller needs.
+    final response = await _client.get(
+      Uri.parse('$baseUrl$path'),
+      headers: {..._headers, if (etag != null) 'If-None-Match': etag},
+    );
+
+    if (response.statusCode == 304) {
+      return ConditionalResponse(
+        notModified: true,
+        etag: response.headers['etag'],
+      );
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw FilamentTransportException(
+        _messageOf(response),
+        statusCode: response.statusCode,
+      );
+    }
+
+    return ConditionalResponse(
+      notModified: false,
+      body: jsonDecode(response.body) as Map<String, dynamic>,
+      etag: response.headers['etag'],
+    );
+  }
+
+  @override
   Future<FilamentResponse> post(String path, Map<String, dynamic> body) =>
       _write(_client.post, path, body);
 
@@ -77,6 +115,32 @@ class HttpFilamentTransport implements FilamentTransport {
       statusCode: response.statusCode,
       // A 204's empty body must decode as `{}`, not go through jsonDecode —
       // see FilamentTransport.delete's doc comment; an empty string throws.
+      body: response.body.isEmpty
+          ? const {}
+          : jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
+  @override
+  Future<FilamentResponse> upload(
+    String path, {
+    required List<int> bytes,
+    required String filename,
+    String field = 'file',
+  }) async {
+    final request = http.MultipartRequest('POST', Uri.parse('$baseUrl$path'))
+      ..headers.addAll(_headers)
+      ..fields['field'] = field
+      ..files.add(
+        http.MultipartFile.fromBytes('file', bytes, filename: filename),
+      );
+
+    final response = await http.Response.fromStream(
+      await _client.send(request),
+    );
+
+    return FilamentResponse(
+      statusCode: response.statusCode,
       body: response.body.isEmpty
           ? const {}
           : jsonDecode(response.body) as Map<String, dynamic>,

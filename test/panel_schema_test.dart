@@ -200,5 +200,56 @@ void main() {
         ),
       );
     });
+
+    group('direction and locale', () {
+      test('parses a real direction and locale off the panel block', () {
+        final json = panelJson();
+        (json['panel'] as Map<String, dynamic>)['direction'] = 'rtl';
+        (json['panel'] as Map<String, dynamic>)['locale'] = 'ar';
+
+        final panel = PanelSchema.fromJson(json);
+
+        expect(panel.direction, PanelDirection.rtl);
+        expect(panel.locale, 'ar');
+      });
+
+      test('an absent direction reads as ltr — a server predating P6f, not a '
+          'malformed contract', () {
+        final json = panelJson();
+        expect(
+          (json['panel'] as Map<String, dynamic>).containsKey('direction'),
+          isFalse,
+        );
+
+        expect(PanelSchema.fromJson(json).direction, PanelDirection.ltr);
+      });
+
+      test('an unrecognised direction reads as ltr — the client does not '
+          'trust that the server normalised it', () {
+        final json = panelJson();
+        (json['panel'] as Map<String, dynamic>)['direction'] = 'sideways';
+
+        expect(PanelSchema.fromJson(json).direction, PanelDirection.ltr);
+      });
+
+      test('every resource carries the panel\'s direction, not just the first '
+          '— the fixture has two resources so a bug that populated only the '
+          'first fails here', () {
+        final json = panelJson();
+        (json['panel'] as Map<String, dynamic>)['direction'] = 'rtl';
+        expect(json['resources'], hasLength(greaterThan(1)));
+
+        final panel = PanelSchema.fromJson(json);
+
+        expect(panel.resources, hasLength(greaterThan(1)));
+        for (final resource in panel.resources) {
+          expect(
+            resource.direction,
+            PanelDirection.rtl,
+            reason: '${resource.key} did not inherit the panel direction',
+          );
+        }
+      });
+    });
   });
 }

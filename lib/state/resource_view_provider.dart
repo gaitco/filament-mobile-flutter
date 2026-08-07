@@ -1,11 +1,13 @@
 import 'package:flutter/foundation.dart';
 
 import '../data/action_result.dart';
+import '../data/paginated_records.dart';
 import '../data/record_action.dart';
 import '../data/resource_data_source.dart';
 import '../data/resource_record.dart';
 import '../data/write_result.dart';
 import '../ports/filament_transport.dart';
+import '../schema/relation_descriptor.dart';
 import '../schema/resource_schema.dart';
 import 'load_status.dart';
 
@@ -89,4 +91,14 @@ class ResourceViewProvider extends ChangeNotifier {
 
     return result;
   }
+
+  /// One [relation]'s rows for the record this provider holds — the same
+  /// read path `load()` uses, against a sibling URL. A pass-through, not a
+  /// state change: `RelationSectionWidget` owns its own loading/failure
+  /// state for it, the same division `ResourceListProvider` keeps between
+  /// itself and the screen that renders its pages.
+  Future<PaginatedRecords> loadRelation(
+    RelationDescriptor relation, {
+    int page = 1,
+  }) => _source.relation(resource.key, id, relation, page: page);
 }

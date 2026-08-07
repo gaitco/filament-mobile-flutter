@@ -1,4 +1,5 @@
 import 'package:filament_mobile/schema/card_layout.dart';
+import 'package:filament_mobile/schema/resource_labels.dart';
 import 'package:filament_mobile/schema/resource_schema.dart';
 import 'package:filament_mobile/schema/schema_component.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -204,5 +205,22 @@ void main() {
         isNot(resourceFrom({'key': 'a'})),
       );
     });
+
+    test(
+      'a directly-constructed resource defaults to ltr, not the panel\'s '
+      'value — ResourceSchema.fromJson and ResourceSchema.fake() are called '
+      'directly by tests and the contract test, and neither passes a panel',
+      () {
+        expect(resourceFrom({'key': 'a'}).direction, PanelDirection.ltr);
+        expect(ResourceSchema.fake().direction, PanelDirection.ltr);
+        expect(
+          const ResourceSchema(
+            key: 'a',
+            labels: ResourceLabels(singular: 'a', plural: 'b'),
+          ).direction,
+          PanelDirection.ltr,
+        );
+      },
+    );
   });
 }

@@ -8,7 +8,7 @@ import '../ports/panel_view_state.dart';
 import '../schema/resource_schema.dart';
 import '../state/resource_list_provider.dart';
 import 'material_panel_state_builder.dart';
-import 'resource_card.dart';
+import 'paginated_card_list.dart';
 
 /// A resource's records as a scrollable list of cards.
 ///
@@ -30,8 +30,8 @@ class ResourceListScreen extends StatefulWidget {
 
   /// Called when the create affordance is tapped. The screen owns no create
   /// form of its own — same division as `onRecordTap` — so a host that never
-  /// wires this up gets a button that renders (once the resource permits
-  /// create) but does nothing on tap.
+  /// wires this up gets no create button at all, never one that renders and
+  /// silently no-ops on tap.
   final VoidCallback? onCreateTap;
 
   @override
@@ -84,50 +84,57 @@ class _ResourceListScreenState extends State<ResourceListScreen> {
     final builder =
         widget.stateBuilder ?? materialPanelStateBuilder(widget.strings);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.provider.resource.labels.plural),
-        actions: [
-          if (widget.provider.resource.sorts.isNotEmpty)
-            IconButton(
-              icon: const Icon(Icons.sort),
-              onPressed: _openSortSheet,
-              tooltip: widget.strings.sortTitle,
-            ),
-        ],
-        bottom: widget.provider.resource.search.enabled
-            ? PreferredSize(
-                preferredSize: const Size.fromHeight(56),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                  child: TextField(
-                    onChanged: _onSearchChanged,
-                    decoration: InputDecoration(
-                      hintText:
-                          widget.provider.resource.search.placeholder ??
-                          widget.strings.searchHint,
-                      prefixIcon: const Icon(Icons.search),
-                      isDense: true,
-                      border: const OutlineInputBorder(),
+    return withPanelDirection(
+      widget.provider.resource.direction,
+      Scaffold(
+        appBar: AppBar(
+          title: Text(widget.provider.resource.labels.plural),
+          actions: [
+            if (widget.provider.resource.sorts.isNotEmpty)
+              IconButton(
+                icon: const Icon(Icons.sort),
+                onPressed: _openSortSheet,
+                tooltip: widget.strings.sortTitle,
+              ),
+          ],
+          bottom: widget.provider.resource.search.enabled
+              ? PreferredSize(
+                  preferredSize: const Size.fromHeight(56),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                    child: TextField(
+                      onChanged: _onSearchChanged,
+                      decoration: InputDecoration(
+                        hintText:
+                            widget.provider.resource.search.placeholder ??
+                            widget.strings.searchHint,
+                        prefixIcon: const Icon(Icons.search),
+                        isDense: true,
+                        border: const OutlineInputBorder(),
+                      ),
                     ),
                   ),
-                ),
-              )
-            : null,
+                )
+              : null,
+        ),
+        body: ListenableBuilder(
+          listenable: widget.provider,
+          builder: (context, _) => builder(context, _state()),
+        ),
+        floatingActionButton: _createButton(),
       ),
-      body: ListenableBuilder(
-        listenable: widget.provider,
-        builder: (context, _) => builder(context, _state()),
-      ),
-      floatingActionButton: _createButton(),
     );
   }
 
   /// Gated on the **resource**-level block: capability, not authorization.
   /// There is no per-record question to ask here — nothing is being created
   /// yet — so the resource's `permissions.create` is the only signal there is.
+  ///
+  /// Also gated on `onCreateTap != null`: a host that never wired it must get
+  /// no button, never one that renders enabled and silently no-ops on tap.
   Widget? _createButton() {
     if (!widget.provider.resource.permissions.create) return null;
+    if (widget.onCreateTap == null) return null;
 
     return FloatingActionButton(
       key: const ValueKey('resource.create'),
@@ -144,7 +151,7 @@ class _ResourceListScreenState extends State<ResourceListScreen> {
     // post-frame load(), and treating it as anything else flashes the empty
     // state before the records arrive.
     if (provider.status.isLoading || provider.status.isInitial) {
-      return PanelData(content: _skeleton());
+      return const PanelData(content: CardListSkeleton());
     }
 
     if (provider.status.isFailure) {
@@ -164,76 +171,56 @@ class _ResourceListScreenState extends State<ResourceListScreen> {
     return PanelData(content: _list());
   }
 
-  /// Skeleton cards use the real card widget with fake records, so the shape
-  /// on screen while loading matches the shape that replaces it.
-  Widget _skeleton() {
-    return ListView.builder(
-      padding: const EdgeInsets.all(8),
-      itemCount: 6,
-      itemBuilder: (context, index) => Opacity(
-        opacity: 0.4,
-        child: ResourceCard(
-          layout: ResourceSchema.fake().card,
-          record: ResourceRecord.fake(index),
-        ),
-      ),
-    );
-  }
-
   Widget _list() {
     final provider = widget.provider;
 
-    return RefreshIndicator(
+    return PaginatedCardList(
+      records: provider.records,
+      layout: provider.resource.card,
+      isLoadingMore: provider.isLoadingMore,
+      loadMoreFailed: provider.loadMoreFailed,
+      loadMoreErrorMessage: provider.errorMessage,
+      retryLabel: widget.strings.retry,
       onRefresh: provider.refresh,
-      child: ListView.builder(
-        controller: _scroll,
-        padding: const EdgeInsets.all(8),
-        itemCount: provider.records.length + (provider.isLoadingMore ? 1 : 0),
-        itemBuilder: (context, index) {
-          if (index >= provider.records.length) {
-            return const Padding(
-              padding: EdgeInsets.all(16),
-              child: Center(child: CircularProgressIndicator()),
-            );
-          }
-
-          final record = provider.records[index];
-
-          return ResourceCard(
-            layout: provider.resource.card,
-            record: record,
-            onTap: widget.onRecordTap == null
-                ? null
-                : () => widget.onRecordTap!(record),
-          );
-        },
-      ),
+      onLoadMoreRetry: provider.loadMore,
+      controller: _scroll,
+      onRecordTap: widget.onRecordTap,
     );
   }
 
   Future<void> _openSortSheet() async {
     final provider = widget.provider;
+    // NOT `Directionality.of(context)`: this `State`'s own `context` is an
+    // ANCESTOR of the `Directionality` `build()` wraps around the `Scaffold`
+    // — see `textDirectionOf`'s doc. Resolved straight from the schema
+    // value instead, which is also the value the sheet needs to inherit
+    // anyway (`showModalBottomSheet` opens a route in the Navigator's
+    // overlay, a sibling of this screen, not a descendant of it).
+    final direction = textDirectionOf(provider.resource.direction);
 
     final chosen = await showModalBottomSheet<ResourceSort>(
       context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(
-                widget.strings.sortTitle,
-                style: Theme.of(context).textTheme.titleMedium,
+      builder: (sheetContext) => Directionality(
+        textDirection: direction,
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  widget.strings.sortTitle,
+                  style: Theme.of(sheetContext).textTheme.titleMedium,
+                ),
               ),
-            ),
-            for (final sort in provider.resource.sorts)
-              ListTile(
-                title: Text(sort.label),
-                selected: sort.key == provider.activeSort?.key,
-                onTap: () => Navigator.of(context).pop(sort),
-              ),
-          ],
+              for (final sort in provider.resource.sorts)
+                ListTile(
+                  title: Text(sort.label),
+                  selected: sort.key == provider.activeSort?.key,
+                  onTap: () => Navigator.of(sheetContext).pop(sort),
+                ),
+            ],
+          ),
         ),
       ),
     );

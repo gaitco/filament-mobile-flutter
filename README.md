@@ -94,6 +94,38 @@ and link handling — is in [`example/`](example).
 Everything below is reference. Each feature section ends with a **Known
 weaknesses** list stating plainly what it does not do.
 
+## Field types this client renders
+
+Every wire type the server can publish for a **form** has a built-in widget:
+
+`text` · `textarea` · `email` · `password` · `number` · `select` ·
+`multiselect` · `radio` · `toggle` · `checkbox` · `date` · `datetime` ·
+`time` · `color` · `file` · `tags` · `keyvalue` · `repeater`
+
+Infolist entries render through `EntryRegistry`: `text_entry`,
+`badge_entry`, `boolean_entry`, `image_entry` and `rich_entry`.
+
+A type this build does not know renders as an `UnknownComponent` — a visible
+placeholder in debug, skipped entirely in release, so a newer server never
+breaks an older client. **Register your own** for a custom type, or to override
+a built-in:
+
+```dart
+final registry = FieldRegistry.defaults()
+  ..register('signature', (context, component, state) {
+    return MySignaturePad(
+      value: state.value as String?,
+      onChanged: state.onChanged,
+    );
+  });
+
+ResourceFormScreen(provider: provider, registry: registry);
+```
+
+That pairs with `config('filament-mobile.types')` on the server, which maps an
+unmapped Filament component onto a type the contract already defines — see the
+Laravel package's **Supported form inputs**.
+
 ## Implementing `FilamentTransport`
 
 A host implements `FilamentTransport` over its own HTTP client, and optionally

@@ -9,6 +9,14 @@ the JSON contract that `gait/filament-mobile` serves.
 
 ![Screens](https://raw.githubusercontent.com/gaitco/filament-mobile-flutter/main/art/showcase.png)
 
+## Install
+
+```bash
+flutter pub add filament_mobile
+```
+
+Point it at a Laravel panel running [`gait/filament-mobile`](https://packagist.org/packages/gait/filament-mobile).
+
 ## Requirements
 
 - **Flutter `>=3.44.0`** and Dart `^3.12.0`. A host on an older toolchain must
@@ -16,31 +24,79 @@ the JSON contract that `gait/filament-mobile` serves.
   with it.
 - Two runtime dependencies only: `flutter` and `equatable`.
 
-## Wiring
+## Quick start
 
-A host implements `FilamentTransport` over its own HTTP client, and optionally
-a `PanelStateBuilder` to render loading, empty and failure states with its own
-widgets.
+Implement `FilamentTransport` over whatever HTTP client you already use, then
+hand a `ResourceDataSource` to the screens. This is the example app's wiring,
+trimmed to the shortest thing that runs — the example itself also passes a
+schema cache, an upload transport, a file picker and a link handler:
+
+```dart
+final source = RestResourceDataSource(
+  transport: MyTransport(baseUrl: 'https://panel.example.com', token: () => myToken),
+);
+
+// The panel index — every resource the signed-in user may see.
+PanelIndexScreen(
+  provider: PanelProvider(source),
+  onResourceTap: (resource) => Navigator.of(context).push(
+    MaterialPageRoute(
+      builder: (_) => ResourceListScreen(
+        provider: ResourceListProvider(source: source, resource: resource),
+        onRecordTap: (record) => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => ResourceViewScreen(
+              provider: ResourceViewProvider(
+                source: source,
+                resource: resource,
+                id: record.id,
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  ),
+);
+```
+
+**Navigation is yours.** Every screen takes an `onXTap` callback rather than
+pushing routes itself, so the package never assumes your router. An affordance
+whose callback you do not wire is **absent**, not disabled — this package does
+not render controls that do nothing.
 
 The default endpoint prefix is `/api/mobile-panel` — absolute, so it appends
 correctly to a base URL with no trailing slash. A prefix that is a **whole
 URL** (`https://api.example.com/mobile`) is passed through unchanged, for a
 host whose HTTP client carries no base URL of its own.
 
-### `FilamentStrings` defaults to English, silently
+A full runnable host — real HTTP transport, schema cache, upload, file picker
+and link handling — is in [`example/`](example).
 
-The write path added twelve strings — `save`, `saveFailed`, the four delete
-and cancel strings, and the six client-side validation hints. Every one has an
-English default, so a host that upgrades and changes nothing still compiles
-and still runs — and shows English hints under server-translated labels.
+## What ships
 
-This is sharper than it sounds, because a client hint **blocks the
-submission**: when a required field is empty the request never leaves the
-phone, so the server's already-translated 422 never arrives and English is the
-only thing the user ever sees. Measured on the pilot panel — an Arabic-locale
-Filament panel with 33 production resources.
+| Feature | What you get |
+|---|---|
+| [Actions](#actions) | Buttons the server already authorised for this record |
+| [Upload](#upload) | Single-file upload, through an additive port your existing transport need not implement |
+| [Repeater](#repeater) | Add and remove rows, validated per row |
+| [Relations](#relations) | A child list on the record screen, "See all" opens the full paginated view |
+| [Rich text](#rich-text) | A real document — headings, lists, quotes, emphasis, links |
+| [Schema caching](#schema-caching) | Cold start renders from cache, revalidates behind it |
+| [Dashboard](#dashboard) | Stat tiles render; charts are yours to draw |
+| [RTL and i18n](#rtl-and-i18n) | The panel's direction, not the device's |
 
-## Reads throw, writes don't — read this before implementing `FilamentTransport`
+Everything below is reference. Each feature section ends with a **Known
+weaknesses** list stating plainly what it does not do.
+
+## Implementing `FilamentTransport`
+
+A host implements `FilamentTransport` over its own HTTP client, and optionally
+a `PanelStateBuilder` to render loading, empty and failure states with its own
+widgets. Two things about it are not guessable, and both bite at runtime rather
+than at compile time.
+
+### Reads throw, writes don't
 
 `FilamentTransport.get()` throws on transport **or** HTTP failure: a 404, a
 403, a timeout, all come out the same way, and the caller turns that into a
@@ -81,7 +137,7 @@ typed but not yet submitted (POSTs to `/{resource}/state`) and has no
 form", so it throws on a non-2xx exactly as `get()` does, rather than
 degrading a permission error into a silently empty form.
 
-## A 401 is not a broken server — `FilamentTransportException.statusCode`
+### A 401 is not a broken server — `FilamentTransportException.statusCode`
 
 `PanelViewState` has a fifth variant, `PanelUnauthenticated`, rendered by
 `MaterialPanelStateBuilder` with a lock icon instead of the generic failure
@@ -108,7 +164,9 @@ save-failure banner rather than switching the whole screen — see
 never trips `isUnauthenticated`; every failure still lands on `PanelFailure`,
 exactly as before this field existed.
 
-## Actions — buttons the server decided this record may run
+## Actions
+
+*Buttons the server decided this record may run.*
 
 `ResourceRecord.actions` (`List<RecordAction>`, empty when the resource
 opted none in) is the per-record list `GET /{resource}/{record}` publishes.
@@ -149,7 +207,9 @@ Two more strings joined the `FilamentStrings` English-default rule above:
 still runs — and, per the same caveat as every other default, shows English
 under server-translated action labels until the host supplies its own.
 
-## Upload — the host supplies transport and picker
+## Upload
+
+*The host supplies the transport and the picker.*
 
 A single-file `FileUpload` field is editable from the phone, through two
 separate host-supplied pieces — same escape-hatch shape `chartBuilder`
@@ -311,7 +371,9 @@ failures.
   permanently — this slice has nowhere on the server to save more than one
   path per column.
 
-## Repeater — add and remove rows, validated per row
+## Repeater
+
+*Add and remove rows, validated per row.*
 
 A JSON-column `Repeater::make('items')->schema([...])` field parses into
 `RepeaterComponent` (`children` — the item template, published once, never
@@ -409,7 +471,9 @@ and one with a non-round-tripping child do not. That test exists because the fir
 publishing the key for the refused case only, which rendered every ordinary
 repeater inert with both packages' own suites green.
 
-## Relations — a labelled section on the record screen, "See all" opens the full list
+## Relations
+
+*A labelled section on the record screen; "See all" opens the full list.*
 
 `ResourceSchema.relations` (`List<RelationDescriptor>`, **always present** —
 `[]` when the server publishes none, and read the same way on an *absent*
@@ -543,7 +607,9 @@ string in this package: `seeAll` (`'See all'`), `relationEmpty`
 - **Nothing is writable.** No create, edit, delete, attach or detach — the
   section and the full list are both read paths only.
 
-## Rich text — the document renders; links are host-wired, absent when unwired
+## Rich text
+
+*The document renders; links are host-wired, and absent when unwired.*
 
 An infolist entry with `EntryKind.rich` (a `->prose()` `TextEntry`, or a
 model column registered with `HasRichContent`) renders as an actual
@@ -622,7 +688,9 @@ registry it already owns.
   unrecognised node type renders its descendant text as a paragraph rather
   than disappearing, so content survives even where formatting does not.
 
-## Schema caching — cold start renders instantly, revalidates behind it
+## Schema caching
+
+*Cold start renders instantly, then revalidates behind it.*
 
 `/schema` is a ~200 KB document, and until now `PanelProvider.load()` showed
 a spinner for every fetch of it, every launch. Two separate, optional ports
@@ -801,7 +869,9 @@ be masked by a stale panel sitting in `success`.
 - **No eviction.** One document per key, overwritten in place; a host that
   creates unbounded keys grows unbounded storage.
 
-## Dashboard — stats render, charts are the host's
+## Dashboard
+
+*Stats render; charts are the host's.*
 
 `DashboardProvider` + `DashboardScreen` follow the same provider/screen
 shape as every other read screen: `LoadStatus`, skeleton-first loading,
@@ -875,7 +945,9 @@ build against this screen:
   `load()`/pull-to-refresh; there is no timer built into `DashboardProvider`
   and none is planned for this screen.
 
-## RTL and i18n — the panel decides, not the device
+## RTL and i18n
+
+*The panel decides the direction, not the device.*
 
 Every screen this package ships — `PanelIndexScreen`, `ResourceListScreen`,
 `ResourceFormScreen`, `ResourceViewScreen`, `RelationListScreen`,
@@ -1027,3 +1099,18 @@ direction, silently ignoring the wrap `build()` installs one line away.
 Resolve from the schema value instead, via `textDirectionOf(...)`
 (`lib/ui/material_panel_state_builder.dart`), whenever the call site is not
 itself inside `build(BuildContext)`.
+
+## Strings
+
+*`FilamentStrings` defaults to English, silently.*
+
+The write path added twelve strings — `save`, `saveFailed`, the four delete
+and cancel strings, and the six client-side validation hints. Every one has an
+English default, so a host that upgrades and changes nothing still compiles
+and still runs — and shows English hints under server-translated labels.
+
+This is sharper than it sounds, because a client hint **blocks the
+submission**: when a required field is empty the request never leaves the
+phone, so the server's already-translated 422 never arrives and English is the
+only thing the user ever sees. Measured on the pilot panel — an Arabic-locale
+Filament panel with 33 production resources.

@@ -1,5 +1,85 @@
 # Changelog
 
+## 0.7.0 — 2026-08-08
+
+**A latin sentence keeps its punctuation under RTL.** Reported from a real
+simulator: an English review body inside an `ar` panel rendered
+`.Great lamp, sturdy base` — the trailing full stop at the wrong end, because
+a period is bidi-neutral and takes the paragraph's direction. The previous
+release isolated grouped **digits** only, so a phone number rendered correctly
+while the sentence around it did not. The rule now covers any run whose own
+base direction opposes the paragraph's. Measured: `x(Great)=14.0 / x(.)=0.0`
+before, `x(Great)=0.0 / x(.)=322.0` after.
+
+A **composed** paragraph — rich text, built from several mark leaves — cannot
+use that, because isolating each leaf changes how the whole paragraph lays out
+(measured: a blockquote lost its RTL indent). Those paragraphs resolve their
+own `textDirection` from their own content instead, so an English summary
+inside an Arabic panel reads left to right while an Arabic sibling keeps RTL
+with its phone number intact.
+
+**The default screens got a visual pass.** They are a reference implementation
+rather than a design system — a host still overrides any of it through
+`PanelStateBuilder` and the registries — but the defaults were genuinely hard
+to read:
+
+- record actions move into an overflow menu. Inline they were coloured
+  `TextButton`s of varying width wedged between two icon buttons — three
+  treatments in one bar, crowding a phone and overflowing at three actions.
+  The semantic colour survives as a leading dot. **A host calling these by
+  label in a widget test now opens the menu first.**
+- bare top-level entries are grouped into one card; a panel declaring
+  `Section`s already got that treatment, one declaring bare entries did not.
+- an entry label is muted and smaller, so it reads as a label rather than as
+  a sibling line of its own value.
+- `ResourceCard` is outlined rather than filled and carries its own margin —
+  filled cards stacked with no gap read as a wall of slabs.
+- the panel index gets outlined cards with divided rows and a chevron that
+  **flips with the direction**: `ListTile` moves the slot under RTL, but the
+  glyph has to be chosen, or it points back at the text it should lead away
+  from.
+
+**Colour and time fields.** `color` and `time` render and edit against the
+matching Laravel release.
+
+`color` is a **text field with a live swatch**, not a colour wheel — this
+package takes no colour dependency, and a hand-rolled picker's colour maths is
+easy to get subtly wrong and hard to test. It parses all four formats and
+**never converts between them**: a field declared `rgb` emits `rgb`, never an
+equivalent hex. A malformed value blocks submission, but **only once the user
+has edited that field** — the client must not invent a constraint the server
+does not have, and must not block a save over a value that was already in the
+database when the form opened.
+
+`time` joins `DateKind`, which is now a three-way. `DateComponent` gained
+`seconds` and `unreadableBounds`, the latter distinguishing "no bound was
+declared" from "a bound arrived that I could not parse"; the second is a
+contract violation and warns in debug builds only.
+
+**Three bugs fixed, all of which a host may have hit:**
+
+- **A bounded date field crashed on tap.** `showDatePicker` asserts that
+  `initialDate` lies within `firstDate`/`lastDate`, and the field passed the
+  stored value through unclamped. Latent until this release started publishing
+  bounds — before that every bound was null and the fallback range was
+  1900–2100, so `initialDate` was always trivially in range. The clamp runs
+  through `DateUtils.dateOnly`, because `showDatePicker` applies that itself
+  *before* asserting, so an instant-wise clamp still trips where local time and
+  UTC sit on different calendar days. Contradictory bounds (`min > max`) now
+  read as no bounds instead of crashing.
+- **Every datetime field showed a 12-hour clock to 24-hour users.**
+  `formatTimeOfDay` never read `MediaQuery.alwaysUse24HourFormat`, so a
+  24-hour-locale user saw `2:05 PM`.
+- **A `seconds: true` field silently truncated stored seconds.** Opening the
+  picker and pressing OK without editing turned `14:05:30` into `14:05:00`.
+  Seconds are now preserved when the hour and minute are unchanged, and reset
+  when the time genuinely changed — welding a stale `:30` onto a newly chosen
+  16:20 would be a time the user never picked.
+
+**Host-affecting:** `SchemaComponent` is `sealed`, so a host switching
+exhaustively over component types *outside* `FieldRegistry` gains two more
+cases. A host using `FieldRegistry` is unaffected.
+
 ## 0.6.0 — 2026-08-07
 
 **Radio, tags and key/value.** Three new field types render and edit

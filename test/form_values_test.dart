@@ -272,6 +272,21 @@ void main() {
 
       expect(values['status'], isNull);
     });
+
+    test('seeds a color field\'s default too — fix round 1, Finding 1', () {
+      // ColorComponent parses `defaultValue` same as every other component
+      // here, but `_defaultOf`'s switch had no arm for it, so a panel
+      // author's `->default('#ff0000')` silently did nothing on a mobile
+      // create form.
+      final component = SchemaComponent.fromJson(const {
+        'type': 'color',
+        'name': 'accent',
+        'default': '#ff0000',
+        'config': {'format': 'hex'},
+      }, 'test');
+
+      expect(FormValues.initial([component])['accent'], '#ff0000');
+    });
   });
 
   group('dirty', () {

@@ -171,7 +171,7 @@ Widget _blockNode(
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Text(
-          isolateGroupedDigits(text, Directionality.of(context)),
+          isolateBidi(text, Directionality.of(context), wholeRun: false),
           style: Theme.of(context).textTheme.bodyMedium,
         ),
       );
@@ -255,6 +255,20 @@ Widget _textBlock(
       children: spans.isEmpty ? const [TextSpan(text: ' ')] : spans,
     ),
     textAlign: _textAlignOf(node.attrs.textAlign),
+    // The paragraph resolves its OWN direction from its own content, rather
+    // than inheriting the panel's and letting neutral characters drift to the
+    // wrong end. An English sentence inside an `ar` panel rendered
+    // `.finish. See the care guide for details` — the full stop is
+    // bidi-neutral, so it took the panel's RTL direction and led the line.
+    //
+    // This is the paragraph-level counterpart of `isolateBidi`, and it exists
+    // because a paragraph here is composed from several mark leaves: isolating
+    // each leaf individually would fix the punctuation but change how the
+    // whole paragraph lays out (measured — a blockquote lost its RTL indent),
+    // so the leaves stay unisolated (`wholeRun: false`) and the paragraph is
+    // told its direction instead. Null keeps the ambient direction, which is
+    // right for a paragraph with no strong character of its own.
+    textDirection: directionOf(_descendantText(node)),
   );
 
   return Padding(
@@ -300,7 +314,7 @@ TextAlign? _textAlignOf(String? raw) => switch (raw) {
 /// siblings (fix round 1, minor 5: a phone number split across a mark
 /// boundary — e.g. its first group bold, the rest plain — arrives here as
 /// two separate leaves, and neither one alone matches
-/// [isolateGroupedDigits]'s pattern, so neither gets isolated. Accepted as a
+/// [isolateBidi]'s pattern, so neither gets isolated. Accepted as a
 /// known ceiling: a marked-up run splitting mid-group is rare, and merging
 /// leaves before isolating would mean re-deriving which merged characters
 /// came from which mark to rebuild the per-leaf `TextSpan`s afterward — a
@@ -315,9 +329,10 @@ InlineSpan _span(
     // same "never lose it" fallback [_blockNode]'s default arm applies to
     // blocks.
     return TextSpan(
-      text: isolateGroupedDigits(
+      text: isolateBidi(
         _descendantText(node),
         Directionality.of(context),
+        wholeRun: false,
       ),
     );
   }
@@ -367,9 +382,10 @@ InlineSpan _span(
     );
   }
 
-  final text = isolateGroupedDigits(
+  final text = isolateBidi(
     node.text ?? '',
     Directionality.of(context),
+    wholeRun: false,
   );
   return TextSpan(text: text, style: style, recognizer: recognizer);
 }

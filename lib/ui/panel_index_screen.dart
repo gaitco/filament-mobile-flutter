@@ -109,28 +109,75 @@ class _PanelIndexScreenState extends State<PanelIndexScreen> {
       }
     }
 
+    final theme = Theme.of(context);
+
     return ListView(
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
       children: [
-        for (final resource in ungrouped) _tile(resource),
+        if (ungrouped.isNotEmpty) _card(ungrouped),
         for (final entry in grouped.entries) ...[
           Padding(
             key: ValueKey('panel.group.${entry.key}'),
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+            // Asymmetric, like a relation section's: a heading belongs to the
+            // rows beneath it, and an even gap left it floating between the
+            // card above and its own.
+            padding: const EdgeInsetsDirectional.fromSTEB(4, 20, 4, 8),
             child: Text(
               entry.key,
-              style: Theme.of(context).textTheme.labelLarge,
+              // Muted and tracked out rather than `labelLarge` at full
+              // weight, which put a group name at the same visual rank as
+              // the resources it names — so nothing on the screen led.
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.6,
+              ),
             ),
           ),
-          for (final resource in entry.value) _tile(resource),
+          _card(entry.value),
         ],
       ],
+    );
+  }
+
+  /// One card per group, rows divided inside it. Bare `ListTile`s on the page
+  /// background gave the index no structure at all — just resource names
+  /// floating in space, with nothing saying they were tappable.
+  Widget _card(List<ResourceSchema> resources) {
+    return Card(
+      elevation: 0,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < resources.length; i++) ...[
+            if (i > 0) const Divider(height: 1, indent: 16, endIndent: 16),
+            _tile(resources[i]),
+          ],
+        ],
+      ),
     );
   }
 
   Widget _tile(ResourceSchema resource) {
     return ListTile(
       title: Text(resource.labels.plural),
+      // The glyph flips with the direction, not just its slot: `ListTile`
+      // already moves `trailing` to the leading edge under RTL, but a
+      // right-pointing chevron sitting on the left edge points back at the
+      // text it is meant to lead away from.
+      trailing: Icon(
+        Directionality.of(context) == TextDirection.rtl
+            ? Icons.chevron_left
+            : Icons.chevron_right,
+        size: 20,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
       onTap: () => widget.onResourceTap(resource),
     );
   }

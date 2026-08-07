@@ -10,6 +10,7 @@ part 'components/number_component.dart';
 part 'components/select_component.dart';
 part 'components/boolean_component.dart';
 part 'components/date_component.dart';
+part 'components/color_component.dart';
 part 'components/file_component.dart';
 part 'components/tags_component.dart';
 part 'components/keyvalue_component.dart';
@@ -121,7 +122,13 @@ sealed class SchemaComponent extends Equatable {
       // RadioFieldWidget.
       'radio' => SelectComponent._fromJson(json, common, path),
       'toggle' || 'checkbox' => BooleanComponent._fromJson(json, common),
-      'date' || 'datetime' => DateComponent._fromJson(json, common, path),
+      // `time` shares the model — TimePicker inherits every accessor the
+      // walker reads for `datetime` — but not the bound parse: see
+      // DateComponent.parseTime.
+      'date' ||
+      'datetime' ||
+      'time' => DateComponent._fromJson(json, common, path),
+      'color' => ColorComponent._fromJson(json, common, path),
       'file' => FileComponent._fromJson(json, common, path),
       'tags' => TagsComponent._fromJson(json, common, path),
       'keyvalue' => KeyValueComponent._fromJson(json, common, path),

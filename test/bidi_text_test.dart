@@ -43,6 +43,58 @@ double _xOffsetOf(String text, String needle, TextDirection direction) {
 }
 
 void main() {
+  test('a latin sentence keeps its full stop at the end under RTL', () {
+    // Reported from the owner's own simulator: an English review body inside
+    // an `ar` panel rendered `.Great lamp, sturdy base` — the trailing full
+    // stop at the WRONG END. A period is bidi-NEUTRAL, so inside an RTL
+    // paragraph it takes the paragraph's direction and lands at the left.
+    //
+    // Measured, not asserted on the isolate characters: plain gave
+    // x(Great)=14.0 / x(.)=0.0, isolated gave x(Great)=0.0 / x(.)=322.0.
+    const raw = 'Great lamp, sturdy base.';
+
+    expect(
+      _xOffsetOf(raw, '.', TextDirection.rtl),
+      lessThan(_xOffsetOf(raw, 'Great', TextDirection.rtl)),
+      reason: 'the defect itself — without this the fix proves nothing',
+    );
+
+    final fixed = isolateBidi(raw, TextDirection.rtl);
+    expect(
+      _xOffsetOf(fixed, '.', TextDirection.rtl),
+      greaterThan(_xOffsetOf(fixed, 'Great', TextDirection.rtl)),
+    );
+  });
+
+  test('an arabic sentence is not wrapped whole, so its digits still are', () {
+    // First-strong is Arabic, so the paragraph and the text agree and there is
+    // nothing to isolate at run level — the per-group rule keeps doing the
+    // work it always did. Asserting the whole string were wrapped would be
+    // asserting a bug: it would isolate Arabic inside Arabic.
+    final out = isolateBidi('اتصل بنا على +20 2 2411 8610', TextDirection.rtl);
+
+    expect(out.startsWith(_lri), isFalse);
+    expect(out.contains('$_lri+20 2 2411 8610$_pdi'), isTrue);
+  });
+
+  test('a rich-text fragment is never wrapped whole', () {
+    // `wholeRun: false` is what `rich_entry_tile` passes, because it calls
+    // this once per mark leaf and several calls compose ONE paragraph.
+    // Wrapping each leaf changes how that paragraph lays out — measured: it
+    // moved a blockquote's quoted text flush against a plain paragraph,
+    // losing the indent RTL had given it.
+    expect(
+      isolateBidi('Great lamp.', TextDirection.rtl, wholeRun: false),
+      'Great lamp.',
+    );
+    expect(
+      isolateBidi('Great lamp.', TextDirection.rtl),
+      '$_lri'
+      'Great lamp.'
+      '$_pdi',
+    );
+  });
+
   testWidgets('a phone number inside Arabic text renders in order under RTL', (
     tester,
   ) async {
@@ -61,7 +113,7 @@ void main() {
           'if this fails the baseline itself is wrong, not the fix',
     );
 
-    final isolated = isolateGroupedDigits(raw, TextDirection.rtl);
+    final isolated = isolateBidi(raw, TextDirection.rtl);
 
     final isolatedFirst = _xOffsetOf(isolated, '+20', TextDirection.rtl);
     final isolatedLast = _xOffsetOf(isolated, '8610', TextDirection.rtl);
@@ -81,26 +133,26 @@ void main() {
 
   test('the same string under LTR is unchanged', () {
     const raw = 'Call us on +20 2 2411 8610 today';
-    expect(isolateGroupedDigits(raw, TextDirection.ltr), same(raw));
+    expect(isolateBidi(raw, TextDirection.ltr), same(raw));
   });
 
   test('a bare year is not isolated', () {
     const raw = 'تقرير عام 2024 السنوي';
-    final result = isolateGroupedDigits(raw, TextDirection.rtl);
+    final result = isolateBidi(raw, TextDirection.rtl);
     expect(result, raw);
     expect(result, isNot(contains(_lri)));
   });
 
   test('a price is not isolated', () {
     const raw = 'السعر 19.99 دولار';
-    final result = isolateGroupedDigits(raw, TextDirection.rtl);
+    final result = isolateBidi(raw, TextDirection.rtl);
     expect(result, raw);
     expect(result, isNot(contains(_lri)));
   });
 
   test('a single unbroken token is not isolated', () {
     const raw = 'رقم الحساب 1234567890123 مسجل';
-    final result = isolateGroupedDigits(raw, TextDirection.rtl);
+    final result = isolateBidi(raw, TextDirection.rtl);
     expect(result, raw);
     expect(result, isNot(contains(_lri)));
   });
@@ -110,7 +162,7 @@ void main() {
   ) async {
     const raw = 'البطاقة الضريبية 761-164-529 مسجلة';
 
-    final isolated = isolateGroupedDigits(raw, TextDirection.rtl);
+    final isolated = isolateBidi(raw, TextDirection.rtl);
     expect(isolated, contains(_lri));
     expect(isolated, contains(_pdi));
 
@@ -165,7 +217,7 @@ void main() {
               'if this fails the baseline itself is wrong, not the fix',
         );
 
-        final isolated = isolateGroupedDigits(raw, TextDirection.rtl);
+        final isolated = isolateBidi(raw, TextDirection.rtl);
 
         expect(
           _xOffsetOf(isolated, first, TextDirection.rtl),
@@ -187,11 +239,8 @@ void main() {
           'رقم الحساب 1234567890123 مسجل',
         ]) {
           final raw = eastern(ascii, base);
-          expect(isolateGroupedDigits(raw, TextDirection.rtl), raw);
-          expect(
-            isolateGroupedDigits(raw, TextDirection.rtl),
-            isNot(contains(_lri)),
-          );
+          expect(isolateBidi(raw, TextDirection.rtl), raw);
+          expect(isolateBidi(raw, TextDirection.rtl), isNot(contains(_lri)));
         }
       });
     }
@@ -206,9 +255,15 @@ void main() {
     // outputs isolate the SAME visible characters in the same order, so a
     // measurement cannot tell them apart. Which characters got wrapped is
     // exactly what is under test.
+    // Arabic-leading deliberately: since the isolation widened to cover a
+    // whole run whose base direction opposes the paragraph's, a string
+    // STARTING in Latin is wrapped entire and never reaches the per-run
+    // pattern at all. The `(?<!\w)` guard is now exercised only where the
+    // paragraph and the run agree in direction — an Arabic sentence quoting
+    // an ASCII token — which is exactly where it still has work to do.
     expect(
-      isolateGroupedDigits('line1 10 20', TextDirection.rtl),
-      'line1 $_lri'
+      isolateBidi('اتصل line1 10 20', TextDirection.rtl),
+      'اتصل line1 $_lri'
       '10 20'
       '$_pdi',
     );
@@ -217,8 +272,8 @@ void main() {
   test('applying the helper twice does not double-wrap', () {
     const raw = 'اتصل بنا على +20 2 2411 8610 اليوم';
 
-    final once = isolateGroupedDigits(raw, TextDirection.rtl);
-    final twice = isolateGroupedDigits(once, TextDirection.rtl);
+    final once = isolateBidi(raw, TextDirection.rtl);
+    final twice = isolateBidi(once, TextDirection.rtl);
 
     expect(twice, once);
     expect(_lri.allMatches(twice).length, 1);

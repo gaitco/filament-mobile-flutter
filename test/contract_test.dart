@@ -245,6 +245,89 @@ void main() {
       expect(bodyHtml.type, 'textarea');
     });
 
+    test('date bounds arrive from the real snapshot, not just a hand-built '
+        'fixture', () {
+      // Fix round 1, P8 Task 1: the same P6d-shaped gap (`relations: []`
+      // proving nothing) applied here too — nothing in the golden panel
+      // declared a real minDate/maxDate, so DateComponent's parse path,
+      // including _parseDate's UTC reinterpretation, only ever ran against
+      // JSON this suite wrote by hand. `published_at` now carries real,
+      // different bounds; `published_on` stays unbounded, so both cases are
+      // proven from one real server document.
+      Iterable<SchemaComponent> flatten(Iterable<SchemaComponent> nodes) sync* {
+        for (final node in nodes) {
+          yield node;
+          if (node is LayoutComponent) yield* flatten(node.children);
+        }
+      }
+
+      final posts = panel.resource('posts')!;
+      final nodes = flatten(posts.form).toList();
+
+      final publishedAt =
+          nodes.firstWhere((n) => n.name == 'published_at') as DateComponent;
+      expect(publishedAt.minDate, DateTime.utc(2026, 1, 1));
+      expect(publishedAt.maxDate, DateTime.utc(2026, 12, 31));
+
+      final publishedOn =
+          nodes.firstWhere((n) => n.name == 'published_on') as DateComponent;
+      expect(publishedOn.minDate, isNull);
+      expect(publishedOn.maxDate, isNull);
+
+      // P8 Task 2. `"09:00"` is exactly the string `DateTime.tryParse`
+      // returns null for, so before the time-bound parse existed this pair
+      // would have read as unbounded — a bound the panel declared, published
+      // by the server, and silently deleted by the client. Proven here
+      // against the committed snapshot, not a hand-written Dart fixture.
+      final opensAt =
+          nodes.firstWhere((n) => n.name == 'opens_at') as DateComponent;
+      expect(opensAt.kind, DateKind.time);
+      expect(opensAt.minDate, DateTime.utc(1970, 1, 1, 9));
+      expect(opensAt.maxDate, DateTime.utc(1970, 1, 1, 17));
+      expect(opensAt.seconds, isFalse);
+      expect(opensAt.unreadableBounds, isEmpty);
+
+      final closesAt =
+          nodes.firstWhere((n) => n.name == 'closes_at') as DateComponent;
+      expect(closesAt.kind, DateKind.time);
+      expect(closesAt.minDate, isNull);
+      expect(closesAt.maxDate, isNull);
+      expect(closesAt.seconds, isTrue);
+
+      // Fix round 1. `getMinDate()` is a bare `evaluate()`, so a Carbon-
+      // declared bound publishes a full datetime string where a string-
+      // declared one publishes "09:00". Both halves of the client's bound
+      // parse now cross the package boundary through a real server document
+      // instead of one of them living only as a string typed into a Dart
+      // test — the gap Task 1 closed for date bounds.
+      final reminderAt =
+          nodes.firstWhere((n) => n.name == 'reminder_at') as DateComponent;
+      expect(reminderAt.kind, DateKind.time);
+      expect(reminderAt.minDate, DateTime.utc(1970, 1, 1, 9));
+      expect(reminderAt.maxDate, isNull);
+    });
+
+    test('the color field\'s format arrives from the real snapshot, not '
+        'just a hand-built fixture', () {
+      // P8 Task 3. `accent_color` declares `->rgba()` in PostResource.php —
+      // not the hex default — which is what makes this parse a genuine
+      // non-default format out of real server output rather than only ever
+      // seeing the fallback every other field would also produce.
+      Iterable<SchemaComponent> flatten(Iterable<SchemaComponent> nodes) sync* {
+        for (final node in nodes) {
+          yield node;
+          if (node is LayoutComponent) yield* flatten(node.children);
+        }
+      }
+
+      final posts = panel.resource('posts')!;
+      final nodes = flatten(posts.form).toList();
+
+      final accentColor =
+          nodes.firstWhere((n) => n.name == 'accent_color') as ColorComponent;
+      expect(accentColor.format, ColorFormat.rgba);
+    });
+
     test('writable arrives from the real snapshot, not just a hand-built '
         'fixture', () {
       // `tag_ids` motivated the key originally; the server now saves

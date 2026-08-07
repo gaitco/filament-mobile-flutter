@@ -83,6 +83,8 @@ and link handling — is in [`example/`](example).
 | [Radio](#radio) | Real radio buttons, parsed off `select`'s own model |
 | [Tags](#tags) | Chips with a remove affordance, always a `List<String>` |
 | [Key/value](#keyvalue) | Add/remove pairs, key and value cells gated independently |
+| [Colour](#colour) | A text field with a live swatch, in the panel's own format |
+| [Time and date bounds](#time-and-date-bounds) | `showTimePicker`, and the bounds a picker declares |
 | [Relations](#relations) | A child list on the record screen, "See all" opens the full paginated view |
 | [Rich text](#rich-text) | A real document — headings, lists, quotes, emphasis, links |
 | [Schema caching](#schema-caching) | Cold start renders from cache, revalidates behind it |
@@ -561,6 +563,68 @@ rows in a row produces two rows, not one.
   section for what "not enforced by the write path" means in practice, and
   for the contrast with `disabled`, which this package's write path *does*
   enforce.
+
+## Colour
+
+A `color` field renders as a **text field with a live swatch** — not a colour
+wheel. This package takes no colour dependency, and a hand-rolled picker's
+colour maths is easy to get subtly wrong and hard to test, so the honest
+treatment won.
+
+The swatch updates as you type and **holds the last valid colour** when the
+text is malformed, rather than blanking.
+
+**The value is never converted.** A field the panel declared as `rgb` emits
+`rgb`; the widget parses all four formats (`hex`, `hsl`, `rgb`, `rgba`) and
+returns the one it was given, byte for byte where you did not edit it.
+
+A malformed value blocks submission — **but only once you have edited that
+field**. The check is gated on `FormValues.dirty` for two reasons: the client
+must not invent a constraint the server does not have, and it must not block a
+save over a value that was already in the database when the form opened. One
+new `FilamentStrings` entry carries the message, English default as always.
+
+### Known weaknesses, stated now
+
+- **No graphical picking**, deliberately.
+- **No format conversion**, deliberately.
+- **The `hsl` pattern rejects a fractional hue** while accepting fractional
+  saturation and lightness — faithful to Filament's own regex, not a decision
+  made here.
+- **A malformed colour inside a repeater row is not blocked**, because repeater
+  rows synthesise a fresh `dirty` set. Pre-existing behaviour of the row
+  validator rather than something this field introduced.
+
+## Time and date bounds
+
+`DateKind` is now a three-way — `date`, `datetime`, `time` — and a `time` field
+goes straight to Flutter's own `showTimePicker`, so it costs no dependency.
+
+**Bounds now arrive.** `DateComponent.minDate` / `.maxDate` have been parsed
+since this package was written and were always null, because the server never
+published them. They are live as of the matching Laravel release, and the
+picker clamps to them.
+
+`DateComponent.unreadableBounds` names any bound that **arrived and would not
+parse**, which is different from one that was never declared: the first is a
+contract violation and warns in debug builds, the second is ordinary. The value
+still degrades to `null` either way — a picker with a wrong limit is a
+nuisance, a crashed form is an outage.
+
+Two bound shapes parse, because the server publishes what the panel declared
+rather than normalising it: a bare `"09:00"` and a full
+`"2026-01-01 09:00:00"`.
+
+### Known weaknesses, stated now
+
+- **Bounds are hints.** The server refuses an out-of-range value only if the
+  panel declared a rule saying so.
+- **A `seconds` field resets seconds when the time changes.** They are
+  preserved when the hour and minute are untouched; a genuinely new time starts
+  at `:00`, because welding a stale `:30` onto a newly picked 16:20 would be a
+  time nobody chose.
+- **Step sizes and disabled dates are not published**, so the phone may offer a
+  value the web panel's own controls would not.
 
 ## Relations
 

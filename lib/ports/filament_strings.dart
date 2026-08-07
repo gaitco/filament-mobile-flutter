@@ -19,8 +19,10 @@ class FilamentStrings {
     this.fieldUrl = 'Enter a valid URL',
     this.fieldPattern = 'This value is not in the expected format',
     this.fieldConfirmed = 'The confirmation does not match',
+    this.fieldColor = 'Enter a valid color in the expected format',
     this.fieldMin = _defaultMin,
     this.fieldMax = _defaultMax,
+    this.timeFieldRange = _defaultTimeRange,
     this.save = 'Save',
     this.saveFailed = 'Could not save',
     this.deleteConfirmTitle = 'Delete this record?',
@@ -29,6 +31,7 @@ class FilamentStrings {
     this.cancel = 'Cancel',
     this.create = 'Create',
     this.edit = 'Edit',
+    this.actions = 'Actions',
     this.actionFailed = 'Could not run that action.',
     this.actionConfirm = 'Confirm',
     this.chooseFile = 'Choose file',
@@ -70,11 +73,28 @@ class FilamentStrings {
   final String fieldPattern;
   final String fieldConfirmed;
 
+  /// Shown by a `color` field when its text does not match the format the
+  /// panel declared (hex/hsl/rgb/rgba) — a malformed value blocks submission
+  /// rather than being silently coerced into something the panel never
+  /// declared. See `ColorComponent.isValid`, the single check both this
+  /// message and the field's live swatch are driven from.
+  final String fieldColor;
+
   /// Parameterised rather than a `'%s'` template: Arabic and English put the
   /// bound in different places in the sentence, so a fixed template can't
   /// carry both.
   final String Function(num) fieldMin;
   final String Function(num) fieldMax;
+
+  /// The helper line on a bounded `time` field that declared no helper text
+  /// of its own, e.g. "Between 9:00 AM and 5:00 PM".
+  ///
+  /// `showTimePicker` cannot restrict its dial, so `TimeFieldWidget` pulls an
+  /// out-of-range pick to the nearest bound. Without this the user simply sees
+  /// a different time than the one they chose, with nothing said. Either bound
+  /// may be null — a field may declare only one — and both are already
+  /// formatted in the device's 12/24-hour setting.
+  final String Function(String? min, String? max) timeFieldRange;
 
   final String save;
   final String saveFailed;
@@ -88,6 +108,11 @@ class FilamentStrings {
   /// the delete affordance does: no accessible name otherwise.
   final String create;
   final String edit;
+
+  /// Tooltip on the record screen's overflow menu, which holds the actions
+  /// the server published for this record. Icon-only, so it needs an
+  /// accessible name for the same reason `edit` and `create` do.
+  final String actions;
 
   /// Shown when an action's run fails and the server sent no message.
   ///
@@ -155,4 +180,12 @@ class FilamentStrings {
 
   static String _defaultMin(num bound) => 'Must be at least $bound';
   static String _defaultMax(num bound) => 'Must be at most $bound';
+
+  static String _defaultTimeRange(String? min, String? max) =>
+      switch ((min, max)) {
+        (final min?, final max?) => 'Between $min and $max',
+        (final min?, null) => 'From $min',
+        (null, final max?) => 'Until $max',
+        _ => '',
+      };
 }

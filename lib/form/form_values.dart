@@ -104,6 +104,7 @@ class FormValues {
       SelectComponent(:final defaultValue) => defaultValue,
       BooleanComponent(:final defaultValue) => defaultValue,
       DateComponent(:final defaultValue) => defaultValue,
+      ColorComponent(:final defaultValue) => defaultValue,
       _ => null,
     };
   }

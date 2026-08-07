@@ -195,10 +195,7 @@ void main() {
       await tester.pumpWidget(dashboardHarness(source: source));
       await pumpUntilFound(tester, find.text('Support'));
 
-      expect(
-        find.text(isolateGroupedDigits(value, TextDirection.rtl)),
-        findsOneWidget,
-      );
+      expect(find.text(isolateBidi(value, TextDirection.rtl)), findsOneWidget);
       expect(find.text(value), findsNothing);
     });
 

@@ -178,11 +178,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
             children: [
               Text(stat.label, style: Theme.of(context).textTheme.bodySmall),
               Text(
-                isolateGroupedDigits(stat.value, direction),
+                isolateBidi(stat.value, direction),
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
               if (stat.description != null)
-                Text(isolateGroupedDigits(stat.description!, direction)),
+                Text(isolateBidi(stat.description!, direction)),
               if (stat.chart != null) ...[
                 const SizedBox(height: 8),
                 StatSparkline(values: stat.chart!, color: stat.color),

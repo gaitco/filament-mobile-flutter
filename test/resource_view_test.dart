@@ -204,6 +204,20 @@ Widget viewHarness({
   );
 }
 
+/// Server-published actions live behind the record screen's overflow menu, so
+/// every test that reaches one opens it first. Kept as a helper rather than
+/// repeated inline: the indirection is the *point* of the menu, and a test
+/// that forgets the step fails with "Approve not found", which reads as the
+/// action being missing rather than as the menu being shut.
+Future<void> _openActions(WidgetTester tester) async {
+  await pumpUntilFound(
+    tester,
+    find.byKey(const ValueKey('record.actions.menu')),
+  );
+  await tester.tap(find.byKey(const ValueKey('record.actions.menu')));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   group('ResourceViewProvider', () {
     test('load() moves through loading to success', () async {
@@ -512,7 +526,7 @@ void main() {
       // The screen renders what the server published, in its order — it has
       // no list of its own and no opinion about which actions exist.
       await tester.pumpWidget(viewHarness(source: actionSource()));
-      await pumpUntilFound(tester, find.text('Approve'));
+      await _openActions(tester);
 
       expect(find.text('Approve'), findsOneWidget);
       expect(find.text('Archive'), findsOneWidget);
@@ -532,7 +546,7 @@ void main() {
     ) async {
       final source = actionSource();
       await tester.pumpWidget(viewHarness(source: source));
-      await pumpUntilFound(tester, find.text('Approve'));
+      await _openActions(tester);
 
       await tester.tap(find.text('Approve'));
       await tester.pumpAndSettle();
@@ -546,7 +560,7 @@ void main() {
       (tester) async {
         final source = actionSource();
         await tester.pumpWidget(viewHarness(source: source));
-        await pumpUntilFound(tester, find.text('Archive'));
+        await _openActions(tester);
 
         await tester.tap(find.text('Archive'));
         await tester.pumpAndSettle();
@@ -566,7 +580,7 @@ void main() {
     testWidgets('cancelling a confirmation runs nothing', (tester) async {
       final source = actionSource();
       await tester.pumpWidget(viewHarness(source: source));
-      await pumpUntilFound(tester, find.text('Archive'));
+      await _openActions(tester);
 
       await tester.tap(find.text('Archive'));
       await tester.pumpAndSettle();
@@ -581,7 +595,7 @@ void main() {
       // actions the screen is holding, so a stale record is a wrong screen.
       final source = actionSource();
       await tester.pumpWidget(viewHarness(source: source));
-      await pumpUntilFound(tester, find.text('Approve'));
+      await _openActions(tester);
 
       await tester.tap(find.text('Approve'));
       await tester.pumpAndSettle();
@@ -596,7 +610,7 @@ void main() {
           actionResult: const ActionFailed('Cannot do that yet'),
         );
         await tester.pumpWidget(viewHarness(source: source));
-        await pumpUntilFound(tester, find.text('Approve'));
+        await _openActions(tester);
 
         await tester.tap(find.text('Approve'));
         await tester.pumpAndSettle();
@@ -618,7 +632,7 @@ void main() {
       // feedback: the record on screen changes.
       final source = actionSource(actionResult: const ActionSuccess(null));
       await tester.pumpWidget(viewHarness(source: source));
-      await pumpUntilFound(tester, find.text('Approve'));
+      await _openActions(tester);
 
       await tester.tap(find.text('Approve'));
       await tester.pumpAndSettle();
@@ -639,7 +653,7 @@ void main() {
         // produces nothing at all is indistinguishable from a dead button.
         final source = actionSource(actionResult: const ActionFailed(null));
         await tester.pumpWidget(viewHarness(source: source));
-        await pumpUntilFound(tester, find.text('Approve'));
+        await _openActions(tester);
 
         await tester.tap(find.text('Approve'));
         await tester.pumpAndSettle();
@@ -672,7 +686,7 @@ void main() {
           ],
         );
         await tester.pumpWidget(viewHarness(source: source));
-        await pumpUntilFound(tester, find.text('Archive'));
+        await _openActions(tester);
 
         await tester.tap(find.text('Archive'));
         await tester.pumpAndSettle();
@@ -700,7 +714,7 @@ void main() {
         ],
       );
       await tester.pumpWidget(viewHarness(source: source));
-      await pumpUntilFound(tester, find.text('archive'));
+      await _openActions(tester);
 
       await tester.tap(find.text('archive'));
       await tester.pumpAndSettle();

@@ -130,6 +130,34 @@ class DemoTransport implements FilamentTransport, FilamentUploadTransport {
                 ],
               },
             },
+          // Products only (P8): a colour field in a NON-DEFAULT format, so the
+          // example exercises the never-convert property — a `hex` demo would
+          // prove nothing, since `hex` is what the client would fall back to.
+          if (key == 'products')
+            {
+              'type': 'color',
+              'name': 'accent',
+              'label': 'Accent colour',
+              'columnSpan': 2,
+              'rules': <String, dynamic>{},
+              'config': {'format': 'rgb'},
+            },
+          // Products only (P8): a bounded time field, so the example exercises
+          // a real minDate/maxDate rather than the nulls every date node
+          // carried before this release.
+          if (key == 'products')
+            {
+              'type': 'time',
+              'name': 'dispatch_at',
+              'label': 'Dispatch time',
+              'columnSpan': 2,
+              'rules': <String, dynamic>{},
+              'config': {
+                'minDate': '09:00',
+                'maxDate': '17:00',
+                'seconds': false,
+              },
+            },
           // Products only (P7): a tags field with a configured separator, so
           // the example exercises TagsFieldWidget's chips and suggestions —
           // the separator changes only what the *server* stores (see the

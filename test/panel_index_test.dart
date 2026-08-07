@@ -127,18 +127,43 @@ Widget indexHarness({
   Map<String, String> groups = const {},
   void Function(ResourceSchema)? onResourceTap,
   Object? error,
+  TextDirection direction = TextDirection.ltr,
 }) {
   return MaterialApp(
-    home: PanelIndexScreen(
-      provider: PanelProvider(
-        _Source(resources: resources, groups: groups, error: error),
+    home: Directionality(
+      textDirection: direction,
+      child: PanelIndexScreen(
+        provider: PanelProvider(
+          _Source(resources: resources, groups: groups, error: error),
+        ),
+        onResourceTap: onResourceTap ?? (_) {},
       ),
-      onResourceTap: onResourceTap ?? (_) {},
     ),
   );
 }
 
 void main() {
+  testWidgets('the row chevron points the way the panel reads', (tester) async {
+    // The GLYPH, not just its slot. `ListTile` already moves `trailing` to the
+    // leading edge under RTL, so a right-pointing chevron there points back at
+    // the text it is meant to lead away from.
+    await tester.pumpWidget(indexHarness(resources: const ['orders']));
+    await pumpUntilFound(tester, find.byType(ListTile));
+
+    expect(find.byIcon(Icons.chevron_right), findsOneWidget);
+    expect(find.byIcon(Icons.chevron_left), findsNothing);
+  });
+
+  testWidgets('the row chevron flips under RTL', (tester) async {
+    await tester.pumpWidget(
+      indexHarness(resources: const ['orders'], direction: TextDirection.rtl),
+    );
+    await pumpUntilFound(tester, find.byType(ListTile));
+
+    expect(find.byIcon(Icons.chevron_left), findsOneWidget);
+    expect(find.byIcon(Icons.chevron_right), findsNothing);
+  });
+
   testWidgets('the AppBar title renders once the panel loads', (tester) async {
     // The whole Scaffold must sit inside the ListenableBuilder — a
     // body-only builder rebuilds the list but never the AppBar, so the

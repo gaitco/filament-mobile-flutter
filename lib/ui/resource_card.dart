@@ -29,8 +29,19 @@ class ResourceCard extends StatelessWidget {
     final title = _text(layout.titleField, context);
     final subtitle = _text(layout.subtitleField, context);
 
+    // A hairline outline instead of the default elevated fill. Filled cards
+    // stacked with no gap read as a wall of grey slabs — the owner's
+    // screenshot of a relation section showed exactly that. An outline keeps
+    // each row distinct while letting the page background stay the surface.
     return Card(
+      elevation: 0,
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: theme.colorScheme.outlineVariant),
+      ),
       child: InkWell(
+        borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.all(12),
@@ -87,7 +98,7 @@ class ResourceCard extends StatelessWidget {
   /// behaviour exactly (a title/subtitle/badge holding a timestamp-shaped
   /// string prints it raw, same as always). [context] is unconditional
   /// regardless of that flag: every returned string still needs it to
-  /// resolve the ambient [Directionality] for [isolateGroupedDigits].
+  /// resolve the ambient [Directionality] for [isolateBidi].
   ///
   /// [isolate] defaults to true and is set false only by the badge caller:
   /// a badge's value is about to become [SemanticBadge]'s colour-lookup key,
@@ -136,7 +147,7 @@ class ResourceCard extends StatelessWidget {
     // Grouped digits (a phone number, a spaced IBAN, a hyphenated tax
     // number) reverse inside an RTL card otherwise — see `bidi_text.dart`.
     // A no-op under LTR and on plain prose with no such run.
-    return isolateGroupedDigits(raw, Directionality.of(context));
+    return isolateBidi(raw, Directionality.of(context));
   }
 
   /// An ISO-8601 timestamp, or null for anything else.

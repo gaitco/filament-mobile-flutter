@@ -3,6 +3,7 @@ import 'package:filament_mobile/data/upload_result.dart';
 import 'package:filament_mobile/data/write_result.dart';
 import 'package:filament_mobile/ports/filament_strings.dart';
 import 'package:filament_mobile/ports/filament_transport.dart';
+import 'package:filament_mobile/schema/schema_component.dart';
 import 'package:filament_mobile/state/load_status.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -365,6 +366,100 @@ void main() {
         source.writeCalls,
         0,
         reason: 'a blocked submit must not call out',
+      );
+    });
+
+    test(
+      'a malformed color value blocks submission before any request',
+      () async {
+        // P8 Task 3. Asserts the block is real, not just that an error string
+        // appeared somewhere: `submit()` must return false AND the source must
+        // never see a create/update call — the same two-part proof
+        // "client hints block before any request" gives `required`, run
+        // against a value that is present but does not parse.
+        final source = FakeSource(components: colorForm());
+        final provider = providerFor(source);
+        await provider.load();
+        provider.change('brand', 'not a color');
+
+        expect(await provider.submit(), isFalse);
+        expect(
+          provider.fieldErrors['brand'],
+          const FilamentStrings().fieldColor,
+        );
+        expect(
+          source.writeCalls,
+          0,
+          reason: 'a blocked submit must not call out',
+        );
+      },
+    );
+
+    test('a color value valid only in another format still blocks — no '
+        'cross-format leniency', () async {
+      // rgb(51, 102, 153) is #336699's exact equivalent; the field
+      // declared rgb, so a hex string is still malformed for it. Passing
+      // this would mean the validator accepted a value by silently
+      // reading it as a different format than the one published — the
+      // provider-level half of the "never converts" property.
+      final source = FakeSource(components: colorForm(format: 'rgb'));
+      final provider = providerFor(source);
+      await provider.load();
+      provider.change('brand', '#336699');
+
+      expect(await provider.submit(), isFalse);
+      expect(provider.fieldErrors, contains('brand'));
+      expect(source.writeCalls, 0);
+    });
+
+    test('fix round 1, Finding 3: an untouched malformed color from a loaded '
+        'record does not block editing an unrelated field', () async {
+      // The blast radius the finding names: a legacy record holding a
+      // color value outside the four Filament-documented regexes (here,
+      // 8-digit hex+alpha — valid CSS, not covered by
+      // vendor/filament/forms/docs/17-color-picker.md's own suggested
+      // pattern) must not make the WHOLE form unsubmittable the moment the
+      // user edits a completely different field they never touched.
+      final components = [
+        SchemaComponent.fromJson(const {
+          'type': 'color',
+          'name': 'brand',
+          'config': {'format': 'hex'},
+        }, 'form[0]'),
+        SchemaComponent.fromJson(const {
+          'type': 'text',
+          'name': 'title',
+        }, 'form[1]'),
+      ];
+      final source = FakeSource(
+        components: components,
+        record: const ResourceRecord(
+          id: 7,
+          attributes: {'brand': '#aabbccdd', 'title': 'Old'},
+        ),
+      );
+      final provider = providerFor(source, recordId: 7);
+      await provider.load();
+      provider.change('title', 'New');
+
+      expect(await provider.submit(), isTrue);
+      expect(source.lastPayload?['brand'], '#aabbccdd');
+      expect(source.lastPayload?['title'], 'New');
+    });
+
+    test('a well-formed color value submits normally, unmodified', () async {
+      final source = FakeSource(components: colorForm());
+      final provider = providerFor(source);
+      await provider.load();
+      provider.change('brand', 'rgb(10, 20, 30)');
+
+      expect(await provider.submit(), isTrue);
+      expect(
+        source.lastPayload?['brand'],
+        'rgb(10, 20, 30)',
+        reason:
+            'the exact typed string must reach the payload, never a '
+            'converted form',
       );
     });
 

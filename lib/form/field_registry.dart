@@ -62,7 +62,16 @@ class FieldRegistry {
         component: component,
         state: state,
       ),
+      // `time` parses onto the same DateComponent as `date`/`datetime`, so it
+      // is discriminated by its kind here — matched before the bare
+      // DateComponent() case below, which would otherwise catch it and put a
+      // calendar in front of a field that has no date.
+      DateComponent(kind: DateKind.time) => TimeFieldWidget(
+        component: component,
+        state: state,
+      ),
       DateComponent() => DateFieldWidget(component: component, state: state),
+      ColorComponent() => ColorFieldWidget(component: component, state: state),
       FileComponent() => FileFieldWidget(component: component, state: state),
       TagsComponent() => TagsFieldWidget(component: component, state: state),
       KeyValueComponent() => KeyValueFieldWidget(
@@ -87,9 +96,15 @@ class FieldRegistry {
   }
 
   /// The built-in leaf types this switch dispatches on, unioned with whatever
-  /// a host has registered. Derived, not restated by hand: a registered
-  /// custom type is picked up automatically, and there is no separate list
-  /// for a contract test to drift against.
+  /// a host has registered. The host half *is* derived — a registered custom
+  /// type is picked up automatically.
+  ///
+  /// [_builtInTypes] is not: it is a hand-maintained mirror of the `switch`
+  /// above, and it drifts. `time` fell out of it between P8 Tasks 2 and 3 and
+  /// was only noticed in review. A golden-fed test now counts the types the
+  /// contract emits against this set, so the next drift reds instead of
+  /// shipping — but the list still has to be edited by hand when the switch
+  /// gains an arm.
   Set<String> get renderableTypes => {..._builtInTypes, ..._builders.keys};
 
   static const Set<String> _builtInTypes = {
@@ -105,6 +120,8 @@ class FieldRegistry {
     'checkbox',
     'date',
     'datetime',
+    'time',
+    'color',
     'file',
     'tags',
     'keyvalue',

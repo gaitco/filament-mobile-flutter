@@ -3,7 +3,7 @@
 // (the fourth, the rich-text blockquote's indent, together with its border).
 //
 // Fix round 2 adds the two groups the whole-branch review's Important 2
-// called for: one test per `isolateGroupedDigits` call site, and one per
+// called for: one test per `isolateBidi` call site, and one per
 // overlay route — the seam between a proven helper and the widgets that call
 // it, which nothing exercised before.
 //
@@ -158,7 +158,7 @@ RichDocument _richDoc(List<Map<String, dynamic>> content) =>
 /// Reads the paragraph's OWN painted string (`toPlainText()`) rather than the
 /// source string, so the isolate characters the widget inserted are part of
 /// the offsets being measured — which is what makes deleting the widget's
-/// `isolateGroupedDigits(...)` call flip this assertion instead of merely
+/// `isolateBidi(...)` call flip this assertion instead of merely
 /// changing an invisible character.
 void _expectPhoneGroupsInReadingOrder(WidgetTester tester) {
   RenderParagraph? found;
@@ -188,7 +188,7 @@ void _expectPhoneGroupsInReadingOrder(WidgetTester tester) {
     lessThan(x('8610')),
     reason:
         'the leading group must paint left of the trailing one — without '
-        'isolateGroupedDigits the bidi algorithm reverses them, which is '
+        'isolateBidi the bidi algorithm reverses them, which is '
         'the defect this branch exists to fix',
   );
 }
@@ -199,6 +199,17 @@ ResourceSchema _resource(PanelDirection direction) => ResourceSchema(
   infolist: const [],
   direction: direction,
 );
+
+/// The record screen's published actions sit behind an overflow menu, so a
+/// test that reaches one opens it first.
+Future<void> _openActions(WidgetTester tester) async {
+  await pumpUntilFound(
+    tester,
+    find.byKey(const ValueKey('record.actions.menu')),
+  );
+  await tester.tap(find.byKey(const ValueKey('record.actions.menu')));
+  await tester.pumpAndSettle();
+}
 
 void main() {
   group('screens resolve the panel\'s published direction — read via '
@@ -940,6 +951,37 @@ void main() {
         );
       });
 
+      testWidgets('the time field\'s picker resolves the field\'s direction', (
+        tester,
+      ) async {
+        // A `time` field opens showTimePicker directly, with no date step in
+        // front of it — a second overlay, and the rule this group settled on
+        // is "every overlay is covered", not "a representative one is".
+        await tester.pumpWidget(
+          _rtlHost(
+            Builder(
+              builder: (context) => FieldRegistry.defaults().build(
+                context,
+                SchemaComponent.fromJson(const {
+                  'type': 'time',
+                  'name': 'opens_at',
+                  'label': 'Opens at',
+                }, 'form[0]'),
+                const FieldState(value: null, onChanged: _noop, enabled: true),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.byType(InputDecorator));
+        await tester.pumpAndSettle();
+
+        expect(
+          Directionality.of(tester.element(find.byType(TimePickerDialog))),
+          TextDirection.rtl,
+        );
+      });
+
       testWidgets(
         'the remote-select search sheet resolves the field\'s direction',
         (tester) async {
@@ -995,7 +1037,7 @@ void main() {
           await tester.pumpWidget(
             MaterialApp(home: ResourceViewScreen(provider: provider)),
           );
-          await pumpUntilFound(tester, find.text('Archive'));
+          await _openActions(tester);
 
           await tester.tap(find.text('Archive'));
           await tester.pumpAndSettle();
@@ -1103,117 +1145,114 @@ void main() {
 
   // Fix round 2 (whole-branch review findings 1–3).
 
-  group(
-    'every isolateGroupedDigits call site is pinned (review finding 2)',
-    () {
-      // The whole-branch review's central finding: the *helper* was proved by
-      // measured glyph order and every *screen wrap* by a resolved-direction
-      // read, but the SEAM between them was not tested at all — deleting the
-      // `isolateGroupedDigits(...)` call from `EntryTile`, `ResourceCard._text`
-      // or `RichEntryTile._span` left all 627 tests green. One test per call
-      // site, below, so that deleting any one of them reds a named test.
-      //
-      // The two sites that were already pinned before this round keep their
-      // existing homes rather than being duplicated here:
-      //   - `semantic_badge.dart:49`  → `entry_registry_test.dart`
-      //   - `dashboard_screen.dart:181/184` → `dashboard_screen_test.dart`
-      //
-      // Each assertion measures where the digit groups actually PAINT, never
-      // that a U+2066 got inserted — a `contains(LRI)` assertion passes whether
-      // or not the text renders in order. The baseline that `_phone` genuinely
-      // reverses when NOT isolated is asserted once, in `bidi_text_test.dart`'s
-      // positive case; it is a property of the string under RTL, so it is not
-      // re-derived per widget here.
+  group('every isolateBidi call site is pinned (review finding 2)', () {
+    // The whole-branch review's central finding: the *helper* was proved by
+    // measured glyph order and every *screen wrap* by a resolved-direction
+    // read, but the SEAM between them was not tested at all — deleting the
+    // `isolateBidi(...)` call from `EntryTile`, `ResourceCard._text`
+    // or `RichEntryTile._span` left all 627 tests green. One test per call
+    // site, below, so that deleting any one of them reds a named test.
+    //
+    // The two sites that were already pinned before this round keep their
+    // existing homes rather than being duplicated here:
+    //   - `semantic_badge.dart:49`  → `entry_registry_test.dart`
+    //   - `dashboard_screen.dart:181/184` → `dashboard_screen_test.dart`
+    //
+    // Each assertion measures where the digit groups actually PAINT, never
+    // that a U+2066 got inserted — a `contains(LRI)` assertion passes whether
+    // or not the text renders in order. The baseline that `_phone` genuinely
+    // reverses when NOT isolated is asserted once, in `bidi_text_test.dart`'s
+    // positive case; it is a property of the string under RTL, so it is not
+    // re-derived per widget here.
 
-      testWidgets('EntryTile — an infolist text entry', (tester) async {
-        await tester.pumpWidget(
-          _rtlHost(const EntryTile(label: 'الهاتف', value: _phone)),
-        );
-        _expectPhoneGroupsInReadingOrder(tester);
-      });
+    testWidgets('EntryTile — an infolist text entry', (tester) async {
+      await tester.pumpWidget(
+        _rtlHost(const EntryTile(label: 'الهاتف', value: _phone)),
+      );
+      _expectPhoneGroupsInReadingOrder(tester);
+    });
 
-      testWidgets('ResourceCard._text — a card title', (tester) async {
-        await tester.pumpWidget(
-          _rtlHost(
-            ResourceCard(
-              layout: const CardLayout(titleField: 'phone'),
-              record: ResourceRecord.fromJson(const {
-                'id': 1,
-                'phone': _phone,
-              }, 'id'),
-            ),
+    testWidgets('ResourceCard._text — a card title', (tester) async {
+      await tester.pumpWidget(
+        _rtlHost(
+          ResourceCard(
+            layout: const CardLayout(titleField: 'phone'),
+            record: ResourceRecord.fromJson(const {
+              'id': 1,
+              'phone': _phone,
+            }, 'id'),
           ),
-        );
-        _expectPhoneGroupsInReadingOrder(tester);
-      });
+        ),
+      );
+      _expectPhoneGroupsInReadingOrder(tester);
+    });
 
-      testWidgets('RichEntryTile._span — a plain text leaf', (tester) async {
-        await tester.pumpWidget(
-          _rtlHost(
-            RichEntryTile(
-              document: _richDoc([
-                {
-                  'type': 'paragraph',
-                  'content': [
-                    {'type': 'text', 'text': _phone},
-                  ],
-                },
-              ]),
-            ),
+    testWidgets('RichEntryTile._span — a plain text leaf', (tester) async {
+      await tester.pumpWidget(
+        _rtlHost(
+          RichEntryTile(
+            document: _richDoc([
+              {
+                'type': 'paragraph',
+                'content': [
+                  {'type': 'text', 'text': _phone},
+                ],
+              },
+            ]),
           ),
-        );
-        _expectPhoneGroupsInReadingOrder(tester);
-      });
+        ),
+      );
+      _expectPhoneGroupsInReadingOrder(tester);
+    });
 
-      testWidgets('RichEntryTile._span — the non-text inline fallback', (
-        tester,
-      ) async {
-        // An inline node outside the closed vocabulary falls back to its
-        // descendant text, and that fallback isolates too — a separate call
-        // from the text-leaf one above, so it needs its own pin.
-        await tester.pumpWidget(
-          _rtlHost(
-            RichEntryTile(
-              document: _richDoc([
-                {
-                  'type': 'paragraph',
-                  'content': [
-                    {
-                      'type': 'mention',
-                      'content': [
-                        {'type': 'text', 'text': _phone},
-                      ],
-                    },
-                  ],
-                },
-              ]),
-            ),
+    testWidgets('RichEntryTile._span — the non-text inline fallback', (
+      tester,
+    ) async {
+      // An inline node outside the closed vocabulary falls back to its
+      // descendant text, and that fallback isolates too — a separate call
+      // from the text-leaf one above, so it needs its own pin.
+      await tester.pumpWidget(
+        _rtlHost(
+          RichEntryTile(
+            document: _richDoc([
+              {
+                'type': 'paragraph',
+                'content': [
+                  {
+                    'type': 'mention',
+                    'content': [
+                      {'type': 'text', 'text': _phone},
+                    ],
+                  },
+                ],
+              },
+            ]),
           ),
-        );
-        _expectPhoneGroupsInReadingOrder(tester);
-      });
+        ),
+      );
+      _expectPhoneGroupsInReadingOrder(tester);
+    });
 
-      testWidgets('RichEntryTile._blockNode — the unknown-block fallback', (
-        tester,
-      ) async {
-        await tester.pumpWidget(
-          _rtlHost(
-            RichEntryTile(
-              document: _richDoc([
-                {
-                  'type': 'callout',
-                  'content': [
-                    {'type': 'text', 'text': _phone},
-                  ],
-                },
-              ]),
-            ),
+    testWidgets('RichEntryTile._blockNode — the unknown-block fallback', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _rtlHost(
+          RichEntryTile(
+            document: _richDoc([
+              {
+                'type': 'callout',
+                'content': [
+                  {'type': 'text', 'text': _phone},
+                ],
+              },
+            ]),
           ),
-        );
-        _expectPhoneGroupsInReadingOrder(tester);
-      });
-    },
-  );
+        ),
+      );
+      _expectPhoneGroupsInReadingOrder(tester);
+    });
+  });
 
   group('RichEntryTile\'s textAlign stretch degrades safely under unbounded '
       'width (review finding 5)', () {

@@ -29,7 +29,7 @@ class EntryTile extends StatelessWidget {
     // no-op under LTR and on plain prose with no such run.
     final text = value == null
         ? _emptyValue
-        : isolateGroupedDigits(value!, Directionality.of(context));
+        : isolateBidi(value!, Directionality.of(context));
 
     return Labelled(
       label: label,
@@ -176,14 +176,30 @@ class Labelled extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    // A label needs to read as a *label*, not as a sibling line of the value
+    // it names. Before this it used `labelMedium` at full opacity directly
+    // above the value at body size, which on a real screen looked like two
+    // paragraphs of similar weight stacked with 6px between them — the flat
+    // wall the owner's screenshot showed. Muted, slightly tracked out, and
+    // given a little more room underneath, it recedes and the value leads.
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (label != null)
-            Text(label!, style: Theme.of(context).textTheme.labelMedium),
+          if (label != null) ...[
+            Text(
+              label!,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                letterSpacing: 0.4,
+              ),
+            ),
+            const SizedBox(height: 4),
+          ],
           child,
         ],
       ),

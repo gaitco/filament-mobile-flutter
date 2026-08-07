@@ -87,9 +87,77 @@ final RegExp _groupedDigits = RegExp('(?<!\\w)\\+?$_digit+(?:[ -]$_digit+)+');
 /// `dashboard_screen`) — each isolates one field's fresh raw string exactly
 /// once, never a concatenation of previously-isolated and fresh text. Revisit if a caller
 /// ever does that concatenation.
-String isolateGroupedDigits(String text, TextDirection direction) {
+
+/// The direction a run of text would resolve to on its own, or null when it
+/// has no strong character at all — digits, punctuation and spaces are all
+/// bidi-neutral or weak, so a phone number or a price has none.
+///
+/// A composed paragraph uses this instead of [isolateBidi]: a paragraph built
+/// from several mark leaves cannot isolate each leaf without changing how the
+/// whole thing lays out, but it *can* be told its own direction, which is what
+/// the bidi algorithm needed all along. `rich_entry_tile` passes the result
+/// to `Text.rich`.
+///
+/// This is the standard "first-strong" rule the Unicode algorithm uses to
+/// give a paragraph its own base direction, hand-rolled because this package
+/// takes no `intl` dependency. The RTL ranges are the scripts a Filament
+/// panel actually ships translations for — Hebrew, Arabic and its supplement
+/// and presentation forms, Syriac, Thaana, N'Ko — and anything else with a
+/// case mapping is treated as strong LTR.
+TextDirection? directionOf(String text) {
+  final ltr = _firstStrongIsLtr(text);
+  if (ltr == null) return null;
+  return ltr ? TextDirection.ltr : TextDirection.rtl;
+}
+
+/// The first *strong* character's direction, or null when the string has none.
+bool? _firstStrongIsLtr(String text) {
+  for (final rune in text.runes) {
+    final isRtl =
+        (rune >= 0x0590 && rune <= 0x08FF) || // Hebrew … Arabic Extended-A
+        (rune >= 0xFB1D && rune <= 0xFDFF) || // Hebrew/Arabic presentation
+        (rune >= 0xFE70 && rune <= 0xFEFF); // Arabic presentation forms-B
+    if (isRtl) return false;
+
+    final isLtr =
+        (rune >= 0x0041 && rune <= 0x005A) || // A–Z
+        (rune >= 0x0061 && rune <= 0x007A) || // a–z
+        (rune >= 0x00C0 && rune <= 0x058F); // Latin-1 supplement … Armenian
+    if (isLtr) return true;
+  }
+  return null;
+}
+
+String isolateBidi(
+  String text,
+  TextDirection direction, {
+  bool wholeRun = true,
+}) {
   if (direction != TextDirection.rtl) return text;
   if (text.contains(_lri)) return text;
+
+  // A whole run whose own base direction opposes the paragraph's is isolated
+  // entire, because the damage is not confined to digits. Measured on a real
+  // screenshot from the owner's simulator: an English review body inside an
+  // `ar` panel rendered `.Great lamp, sturdy base` — the trailing full stop
+  // is bidi-NEUTRAL, so it takes the paragraph direction and lands at the
+  // wrong end of the sentence. `x(Great)=14.0, x(.)=0.0` plain against
+  // `x(Great)=0.0, x(.)=322.0` isolated.
+  //
+  // This subsumes nothing: a grouped-digit run has NO strong character at
+  // all (digits are weak), so first-strong returns null for a phone number
+  // and the per-run rule below still does that work. The two rules cover
+  // disjoint cases and both are needed.
+  // `wholeRun: false` is passed by the one caller that hands this a FRAGMENT
+  // rather than a standalone value: `rich_entry_tile`'s `_span`, which is
+  // invoked per mark leaf, so several calls compose a single paragraph.
+  // Isolating each leaf on its own does not just fix punctuation there — it
+  // changes how the paragraph lays out, because each isolate is positioned as
+  // a unit. Measured: it moved a blockquote's quoted text flush against a
+  // plain paragraph, losing the indent the RTL layout had given it. A whole
+  // paragraph's direction is the bidi algorithm's job once it can see the
+  // whole paragraph; a fragment must not pre-empt it.
+  if (wholeRun && _firstStrongIsLtr(text) == true) return '$_lri$text$_pdi';
 
   return text.replaceAllMapped(
     _groupedDigits,

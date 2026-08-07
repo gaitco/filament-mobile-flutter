@@ -1,8 +1,41 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:filament_mobile/form/field_registry.dart';
 import 'package:filament_mobile/form/field_state.dart';
 import 'package:filament_mobile/schema/schema_component.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+/// Every `type` string a **form** node (never `infolist` — those are entry
+/// types this registry deliberately never renders) carries in the committed
+/// golden [file], excluding the four layout types — `renderableTypes` covers
+/// leaf field types, and a layout container is walked for its children, not
+/// asked for a widget of its own. The same file `contract_test.dart`'s
+/// `fixture()` reads, from the same relative path.
+Set<String> _writableTypesIn(String file) {
+  final panel =
+      jsonDecode(File('../../contract/$file').readAsStringSync())
+          as Map<String, dynamic>;
+  const layoutTypes = {'section', 'grid', 'tabs', 'fieldset'};
+  final types = <String>{};
+
+  void walk(List<dynamic> nodes) {
+    for (final raw in nodes) {
+      final node = raw as Map<String, dynamic>;
+      final type = node['type'] as String;
+      if (!layoutTypes.contains(type)) types.add(type);
+      final children = node['children'] as List<dynamic>?;
+      if (children != null) walk(children);
+    }
+  }
+
+  for (final raw in panel['resources'] as List<dynamic>) {
+    walk((raw as Map<String, dynamic>)['form'] as List<dynamic>);
+  }
+
+  return types;
+}
 
 SchemaComponent fieldOfType(String type, {required String name}) =>
     SchemaComponent.fromJson({
@@ -56,7 +89,14 @@ void main() {
   // it reports changes, it shows an error, and it honours enabled: false.
   // A field that renders but silently swallows onChanged is the failure this
   // catches — and it is invisible to a "renders without throwing" test.
-  for (final type in ['text', 'textarea', 'email', 'password', 'number']) {
+  for (final type in [
+    'text',
+    'textarea',
+    'email',
+    'password',
+    'number',
+    'color',
+  ]) {
     testWidgets('$type reports what the user types', (tester) async {
       Object? received;
       await tester.pumpWidget(
@@ -134,7 +174,7 @@ void main() {
   // guard. Each of the remaining ten types gets its own attack here, driving
   // the exact gesture that type accepts, so a regression in the one gating
   // line has somewhere to turn red.
-  for (final type in ['textarea', 'email', 'password']) {
+  for (final type in ['textarea', 'email', 'password', 'color']) {
     testWidgets('$type disabled reports nothing', (tester) async {
       Object? received;
       await tester.pumpWidget(
@@ -337,27 +377,23 @@ void main() {
     expect(find.text('mine'), findsOneWidget);
   });
 
-  test('renderableTypes covers every writable contract type', () {
-    // Derived, not restated. P2-Laravel found its own coverage assertion was a
-    // hand-maintained `toContain` subset that no new type could ever fail.
-    expect(
-      FieldRegistry.defaults().renderableTypes,
-      containsAll([
-        'text',
-        'textarea',
-        'email',
-        'password',
-        'number',
-        'select',
-        'multiselect',
-        'toggle',
-        'checkbox',
-        'date',
-        'datetime',
-        'file',
-      ]),
-    );
-  });
+  test(
+    'renderableTypes covers every writable type the real golden panel emits',
+    () {
+      // Fix round 1, Finding 4: this used to be a hand-typed `containsAll`
+      // subset carrying the comment "Derived, not restated" while being
+      // exactly the hand-maintained list that comment claimed not to be —
+      // and `time` silently rotted out of it for the two commits between
+      // Task 2 shipping it and this fix round noticing. `_writableTypesIn`
+      // reads the same committed golden `laravel_contract_test.dart` already
+      // treats as ground truth, so a type the wire actually emits with no
+      // widget fails HERE, on the type itself, not on a copy of it someone
+      // remembered to update.
+      final golden = _writableTypesIn('laravel-panel.json');
+      expect(golden, isNotEmpty);
+      expect(FieldRegistry.defaults().renderableTypes, containsAll(golden));
+    },
+  );
 
   testWidgets('a select whose value is not among its options still renders', (
     tester,

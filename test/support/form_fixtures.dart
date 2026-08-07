@@ -308,6 +308,22 @@ List<SchemaComponent> fileForm({
   }, 'form[0]'),
 ];
 
+/// One `color` field, declared `rgb` by default — a non-hex default is
+/// deliberate, the same reason `PostResource`'s golden fixture declares
+/// `rgba` rather than leaving the format unconfigured: it is what proves the
+/// format is genuinely read, not just always the fallback. Shared the same
+/// way `fileForm` is, so the field's shape can't drift between a provider-
+/// level "submission is blocked" test and any widget-level one that grows
+/// alongside it.
+List<SchemaComponent> colorForm({String format = 'rgb'}) => [
+  SchemaComponent.fromJson({
+    'type': 'color',
+    'name': 'brand',
+    'label': 'Brand color',
+    'config': {'format': format},
+  }, 'form[0]'),
+];
+
 SchemaComponent? findComponent(List<SchemaComponent> components, String name) {
   for (final component in components) {
     if (component.name == name) return component;

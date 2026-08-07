@@ -213,9 +213,6 @@ void main() {
     final label = tester.widget<Text>(
       find.descendant(of: find.byType(Chip), matching: find.byType(Text)),
     );
-    expect(
-      label.data,
-      isolateGroupedDigits('+20 2 2411 8610', TextDirection.rtl),
-    );
+    expect(label.data, isolateBidi('+20 2 2411 8610', TextDirection.rtl));
   });
 }

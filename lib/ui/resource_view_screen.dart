@@ -8,6 +8,7 @@ import '../data/write_result.dart';
 import '../ports/filament_strings.dart';
 import '../ports/panel_view_state.dart';
 import '../schema/relation_descriptor.dart';
+import '../schema/schema_component.dart';
 import '../state/resource_view_provider.dart';
 import 'entry_registry.dart';
 import 'material_panel_state_builder.dart';
@@ -118,11 +119,37 @@ class _ResourceViewScreenState extends State<ResourceViewScreen> {
   /// old record while reloading, which is a P2 concern, not a brief
   /// requirement.
   Widget _infolist(BuildContext context, ResourceRecord record) {
+    // Top-level entries are grouped into one card rather than left loose on
+    // the page background. A panel whose infolist declares Sections already
+    // got that treatment from `SectionTile`; one that declares bare entries —
+    // the common case — got a flat stack of label/value pairs floating on the
+    // scaffold, which is what the owner's screenshot showed. Grouping them
+    // gives the screen the same rhythm either way, and keeps relation
+    // sections visibly separate from the record's own fields.
+    final loose = <Widget>[];
+    final blocks = <Widget>[];
+    for (final component in widget.provider.resource.infolist) {
+      final built = _registry.build(context, component, record);
+      // A layout component brings its own container; only bare entries need
+      // one supplied.
+      (component is LayoutComponent ? blocks : loose).add(built);
+    }
+
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
-        for (final component in widget.provider.resource.infolist)
-          _registry.build(context, component, record),
+        if (loose.isNotEmpty)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: loose,
+              ),
+            ),
+          ),
+        ...blocks,
         ..._relationSections(record),
       ],
     );
@@ -180,14 +207,43 @@ class _ResourceViewScreenState extends State<ResourceViewScreen> {
         ),
       // Published, not resolved here: the server already filtered these to
       // what this record may run, the same division as `recordCan` above.
-      for (final action in record.actions)
-        TextButton(
-          key: ValueKey('record.action.${action.name}'),
-          style: TextButton.styleFrom(
-            foregroundColor: SemanticBadge.colorFor(action.color),
-          ),
-          onPressed: () => _runAction(action),
-          child: Text(action.label),
+      //
+      // In an overflow menu rather than inline: an app bar has room for two
+      // or three icons, and a resource may publish any number of actions with
+      // labels of any length. Inline they were coloured `TextButton`s of
+      // varying width wedged between the icon buttons — three visual
+      // treatments in one bar, crowding on a phone and overflowing outright
+      // once a panel declared a third action. The menu scales to N and gives
+      // every action one treatment; the semantic colour moves to a leading
+      // dot, where it still carries meaning without turning the label itself
+      // into a colour a reader has to decode.
+      if (record.actions.isNotEmpty)
+        PopupMenuButton<RecordAction>(
+          key: const ValueKey('record.actions.menu'),
+          tooltip: widget.strings.actions,
+          icon: const Icon(Icons.more_vert),
+          onSelected: _runAction,
+          itemBuilder: (context) => [
+            for (final action in record.actions)
+              PopupMenuItem<RecordAction>(
+                key: ValueKey('record.action.${action.name}'),
+                value: action,
+                child: Row(
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: SemanticBadge.colorFor(action.color),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Flexible(child: Text(action.label)),
+                  ],
+                ),
+              ),
+          ],
         ),
     ];
   }

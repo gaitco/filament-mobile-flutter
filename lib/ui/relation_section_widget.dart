@@ -119,14 +119,28 @@ class _RelationSectionWidgetState extends State<RelationSectionWidget> {
     final theme = Theme.of(context);
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      // Generous above, tight below: the heading belongs to the rows under
+      // it, and a symmetric gap made a section float between the block above
+      // and its own content. Grouping by proximity is what makes a screen of
+      // stacked cards read as sections rather than as a wall of slabs.
+      padding: const EdgeInsets.only(top: 20, bottom: 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(widget.relation.label, style: theme.textTheme.titleMedium),
+              Text(
+                widget.relation.label,
+                // A section heading has to outrank the card titles beneath
+                // it. At `titleMedium` it sat at the same weight as the rows
+                // it was naming, so nothing on the screen led.
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: theme.colorScheme.onSurfaceVariant,
+                  letterSpacing: 0.3,
+                ),
+              ),
               // `onSeeAllTap != null` is part of the gate, not just the
               // handler: a host that never wired it must get no button, never
               // one that renders enabled and silently no-ops on tap.

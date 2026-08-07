@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../data/options_page.dart';
@@ -335,7 +336,14 @@ class DateFieldWidget extends StatelessWidget {
     final localizations = MaterialLocalizations.of(context);
     final date = localizations.formatFullDate(value);
     if (component.kind == DateKind.date) return date;
-    return '$date ${localizations.formatTimeOfDay(TimeOfDay.fromDateTime(value))}';
+    // `alwaysUse24HourFormat` is not read from MediaQuery by
+    // `formatTimeOfDay` itself — omitting it shows a 24-hour user "2:05 PM".
+    // Same call, same fix, as TimeFieldWidget's.
+    final time = localizations.formatTimeOfDay(
+      TimeOfDay.fromDateTime(value),
+      alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context),
+    );
+    return '$date $time';
   }
 
   Future<void> _pick(BuildContext context, DateTime? current) async {
@@ -347,11 +355,37 @@ class DateFieldWidget extends StatelessWidget {
     Widget wrapDirection(BuildContext _, Widget? child) =>
         Directionality(textDirection: direction, child: child!);
 
+    // `showDatePicker` asserts that `initialDate` lies inside
+    // `[firstDate, lastDate]`, and it compares the three **date-only** — so
+    // the clamp happens in that same frame, or a timezone straddling midnight
+    // could still trip an assert this code had apparently handled.
+    //
+    // Latent until P8 Task 1: with no bounds published, firstDate/lastDate
+    // fell back to 1900/2100 and `now()` was always inside them. Publishing
+    // real bounds made every ordinary exclude-today idiom — a booking field's
+    // `->minDate(now()->addDay())`, an age check's `->maxDate(now()->subYears(18))`
+    // — crash on the first tap. Same hazard, same fix, as TimeFieldWidget's.
+    var first = DateUtils.dateOnly(component.minDate ?? DateTime(1900));
+    var last = DateUtils.dateOnly(component.maxDate ?? DateTime(2100));
+    if (last.isBefore(first)) {
+      // `showDatePicker` asserts on this pair too, so contradictory bounds
+      // would crash whatever the initial date is. Reading them as no bounds
+      // at all is the rule the parser already applies to a bound it cannot
+      // read: a wrong limit is a nuisance, a crashed form is an outage — and
+      // a client must not be crashable by what a server sends.
+      first = DateTime(1900);
+      last = DateTime(2100);
+    }
+
+    final initial = DateUtils.dateOnly(current ?? DateTime.now());
+
     final date = await showDatePicker(
       context: context,
-      initialDate: current ?? DateTime.now(),
-      firstDate: component.minDate ?? DateTime(1900),
-      lastDate: component.maxDate ?? DateTime(2100),
+      initialDate: initial.isBefore(first)
+          ? first
+          : (initial.isAfter(last) ? last : initial),
+      firstDate: first,
+      lastDate: last,
       builder: wrapDirection,
     );
     if (date == null || !context.mounted) return;
@@ -378,6 +412,309 @@ class DateFieldWidget extends StatelessWidget {
         time.hour,
         time.minute,
       ).toIso8601String(),
+    );
+  }
+}
+
+/// `time`. Flutter's own `showTimePicker`, so no dependency — but it offers
+/// neither bounds nor seconds, so both are handled here:
+///
+///  - **Bounds clamp the pick.** The dial cannot be restricted, so a time
+///    outside `[minDate, maxDate]` is pulled to the nearest bound the moment
+///    it is chosen, and the field shows the clamped value immediately. The
+///    alternative is storing a value the server refuses, and bounds are
+///    published as hints, not as validation rules — nothing else would catch
+///    it.
+///  - **Seconds decide the wire format**, not the picker: `showTimePicker`
+///    cannot pick seconds at all, so a `seconds: true` field reports
+///    `HH:mm:ss`. That matches TimePicker's own `H:i:s` format, which is what
+///    the server parses. Stored seconds are **kept** when the user leaves the
+///    hour and minute alone — opening the picker and pressing OK must not
+///    quietly rewrite `14:05:30` to `14:05:00`.
+///
+/// The reported value is `HH:mm` (or `HH:mm:ss`) — never
+/// `DateTime.toIso8601String()`, which would invent a date the panel never
+/// chose.
+class TimeFieldWidget extends StatelessWidget {
+  const TimeFieldWidget({
+    required this.component,
+    required this.state,
+    super.key,
+  });
+
+  final DateComponent component;
+  final FieldState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = _parse(state.value);
+
+    final field = _TextControl(
+      value: current == null ? null : _format(context, _timeOf(current)),
+      enabled: state.enabled,
+      readOnly: true,
+      onTap: () => _pick(context, current),
+      decoration: InputDecoration(
+        labelText: component.label,
+        helperText: _helperText(context),
+        errorText: state.error,
+        suffixIcon: const Icon(Icons.access_time),
+      ),
+    );
+
+    // The server declared a bound this build could not read, so the picker
+    // will offer times the server rejects. Debug-only, like the unrenderable
+    // entry placeholder: a developer meets it on the first run, a user never
+    // does. Silence here would make a deleted bound indistinguishable from a
+    // bound that was never set.
+    if (!kDebugMode || component.unreadableBounds.isEmpty) return field;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        field,
+        Text('⚠︎ unreadable ${component.unreadableBounds.join(', ')}'),
+      ],
+    );
+  }
+
+  /// Through the parser that read the bounds, so a stored `"14:05:00"` and a
+  /// declared `"09:00"` cannot be read two different ways. Kept as a
+  /// [DateTime] rather than narrowed to a [TimeOfDay] straight away, because
+  /// `TimeOfDay` has no seconds and the stored ones must survive a no-op edit.
+  DateTime? _parse(Object? value) =>
+      value is String ? DateComponent.parseTime(value) : null;
+
+  static TimeOfDay _timeOf(DateTime value) =>
+      TimeOfDay(hour: value.hour, minute: value.minute);
+
+  /// `formatTimeOfDay` does not consult MediaQuery on its own — it defaults to
+  /// 12-hour and leaves the caller to pass the device setting, which is easy
+  /// to miss and shows a 24-hour user "2:05 PM".
+  String _format(BuildContext context, TimeOfDay value) =>
+      MaterialLocalizations.of(context).formatTimeOfDay(
+        value,
+        alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context),
+      );
+
+  /// The panel's own helper text wins; a bounded field with none gets the
+  /// range instead, so the clamp below is an explained correction rather than
+  /// a silent one. Same fall-through shape as `FileFieldWidget._helperText`.
+  String? _helperText(BuildContext context) {
+    if (component.helperText != null) return component.helperText;
+    if (component.minDate == null && component.maxDate == null) return null;
+
+    String? bound(DateTime? value) =>
+        value == null ? null : _format(context, _timeOf(value));
+
+    return state.strings.timeFieldRange(
+      bound(component.minDate),
+      bound(component.maxDate),
+    );
+  }
+
+  Future<void> _pick(BuildContext context, DateTime? current) async {
+    // Same reason DateFieldWidget wraps its pickers: the dialog is a route
+    // above this field, not a descendant, so it does not inherit the panel's
+    // Directionality on its own.
+    final direction = Directionality.of(context);
+
+    final time = await showTimePicker(
+      context: context,
+      // Clamped too — opening on a time the field would immediately move is a
+      // worse first impression than opening on the nearest allowed one.
+      initialTime: _clamp(current == null ? TimeOfDay.now() : _timeOf(current)),
+      builder: (_, child) =>
+          Directionality(textDirection: direction, child: child!),
+    );
+    if (time == null) return;
+
+    final picked = _clamp(time);
+
+    // `showTimePicker` has no seconds concept, so emitting a flat `:00` would
+    // rewrite a stored `14:05:30` to `14:05:00` on nothing more than opening
+    // the picker and pressing OK — data loss on a no-op interaction, with
+    // nothing to signal it. The seconds already there are kept when the user
+    // left the hour and minute alone; a genuinely new time starts at zero,
+    // because there is nothing else it could honestly be.
+    final unchanged =
+        current != null &&
+        picked.hour == current.hour &&
+        picked.minute == current.minute;
+
+    state.onChanged(
+      [
+        picked.hour,
+        picked.minute,
+        if (component.seconds) unchanged ? current.second : 0,
+      ].map((part) => part.toString().padLeft(2, '0')).join(':'),
+    );
+  }
+
+  TimeOfDay _clamp(TimeOfDay time) {
+    final minutes = time.hour * 60 + time.minute;
+    final min = _boundMinutes(component.minDate);
+    final max = _boundMinutes(component.maxDate);
+
+    if (min != null && minutes < min) return _fromMinutes(min);
+    if (max != null && minutes > max) return _fromMinutes(max);
+    return time;
+  }
+
+  int? _boundMinutes(DateTime? bound) =>
+      bound == null ? null : bound.hour * 60 + bound.minute;
+
+  TimeOfDay _fromMinutes(int minutes) =>
+      TimeOfDay(hour: minutes ~/ 60, minute: minutes % 60);
+}
+
+/// `color`. A text field holding the value in the format the panel declared
+/// ([ColorComponent.format]), with a live swatch beside it — chosen over a
+/// graphical picker, deliberately: a hand-rolled HSV widget's colour maths is
+/// easy to get subtly wrong and hard to test (P8 design doc).
+///
+/// **Never converts between formats.** The text field's [onChanged] reports
+/// exactly what the user typed, unmodified — an `rgb` field's stored value
+/// stays `rgb`, byte for byte, where the user did not edit it. The swatch is
+/// display-only: it is built FROM the text to show a colour, never fed back
+/// INTO it.
+///
+/// **A malformed value never blanks the swatch.** [ColorComponent.match]
+/// (through [_swatchColor]) is re-run on every keystroke; a match updates
+/// [_swatch], a non-match leaves it exactly as it was — so the swatch always
+/// shows the last colour the field genuinely held, which is more useful than
+/// blanking on every char of an in-progress edit. The raw text still reaches
+/// [FieldState.onChanged] either way: submission is blocked by
+/// `client_validator.dart` reading the same [ColorComponent.isValid] this
+/// widget's swatch decision is built on, not by this widget withholding the
+/// value.
+class ColorFieldWidget extends StatefulWidget {
+  const ColorFieldWidget({
+    required this.component,
+    required this.state,
+    super.key,
+  });
+
+  final ColorComponent component;
+  final FieldState state;
+
+  @override
+  State<ColorFieldWidget> createState() => _ColorFieldWidgetState();
+}
+
+class _ColorFieldWidgetState extends State<ColorFieldWidget> {
+  late final TextEditingController _controller = TextEditingController(
+    text: _text(widget.state.value),
+  );
+  Color? _swatch;
+
+  static String _text(Object? value) => value is String ? value : '';
+
+  @override
+  void initState() {
+    super.initState();
+    _swatch = _swatchColor(_controller.text);
+  }
+
+  @override
+  void didUpdateWidget(covariant ColorFieldWidget old) {
+    super.didUpdateWidget(old);
+    final text = _text(widget.state.value);
+    if (widget.state.value != old.state.value && text != _controller.text) {
+      _controller.text = text;
+      _swatch = _swatchColor(text) ?? _swatch;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  /// Builds a display [Color] from [raw] read as [ColorComponent.format], or
+  /// null when [ColorComponent.match] finds no match. Component values are
+  /// clamped into a renderable range (`rgb(999, 0, 0)` matches Filament's own
+  /// validation pattern, see [ColorComponent._patterns]) — display-only
+  /// forgiveness that never changes what "malformed" means for validation,
+  /// since that question is answered by the match alone.
+  Color? _swatchColor(String raw) {
+    final match = ColorComponent.match(raw, widget.component.format);
+    if (match == null) return null;
+
+    switch (widget.component.format) {
+      case ColorFormat.hex:
+        var hex = match[1]!;
+        if (hex.length == 3) {
+          hex = hex.split('').map((c) => '$c$c').join();
+        }
+        return Color(int.parse('FF$hex', radix: 16));
+      case ColorFormat.rgb:
+        return _rgba(match, 1);
+      case ColorFormat.rgba:
+        return _rgba(match, double.parse(match[4]!).clamp(0, 1));
+      case ColorFormat.hsl:
+        // Flutter's own HSL→RGB conversion, not a hand-rolled one — the
+        // exact "reach for an existing implementation" the design doc's
+        // reasoning against a hand-rolled HSV *picker* argues for.
+        return HSLColor.fromAHSL(
+          1,
+          double.parse(match[1]!).clamp(0, 360),
+          double.parse(match[2]!).clamp(0, 100) / 100,
+          double.parse(match[3]!).clamp(0, 100) / 100,
+        ).toColor();
+    }
+  }
+
+  Color _rgba(RegExpMatch match, double alpha) => Color.fromRGBO(
+    int.parse(match[1]!).clamp(0, 255),
+    int.parse(match[2]!).clamp(0, 255),
+    int.parse(match[3]!).clamp(0, 255),
+    alpha,
+  );
+
+  void _onChanged(String text) {
+    final parsed = _swatchColor(text);
+    setState(() => _swatch = parsed ?? _swatch);
+    widget.state.onChanged(text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.state.enabled;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: TextField(
+            key: const ValueKey('color.input'),
+            controller: _controller,
+            enabled: enabled,
+            onChanged: enabled ? _onChanged : null,
+            decoration: InputDecoration(
+              labelText: widget.component.label,
+              helperText: widget.component.helperText,
+              errorText: widget.state.error,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Container(
+            key: const ValueKey('color.swatch'),
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: _swatch,
+              shape: BoxShape.circle,
+              border: Border.all(color: Theme.of(context).dividerColor),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

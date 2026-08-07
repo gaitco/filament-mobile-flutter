@@ -59,6 +59,19 @@ SchemaComponent emailField(
   }, 'test');
 }
 
+SchemaComponent colorField(
+  String name, {
+  String format = 'hex',
+  bool required = false,
+}) {
+  return SchemaComponent.fromJson({
+    'type': 'color',
+    'name': name,
+    'config': {'format': format},
+    'rules': {if (required) 'required': true},
+  }, 'test');
+}
+
 SchemaComponent toggleField(String name, {bool required = false}) {
   return SchemaComponent.fromJson({
     'type': 'toggle',
@@ -339,6 +352,130 @@ void main() {
     final values = FormValues.initial(components).set('name', 'abcd');
 
     expect(validate(components, values, local)['name'], local.fieldMax(3));
+  });
+
+  group('color', () {
+    test('a value matching its declared format passes', () {
+      final hex = [colorField('brand')];
+      expect(
+        validate(hex, FormValues.initial(hex).set('brand', '#336699')),
+        isEmpty,
+      );
+
+      final rgba = [colorField('brand', format: 'rgba')];
+      expect(
+        validate(
+          rgba,
+          FormValues.initial(rgba).set('brand', 'rgba(1, 2, 3, 0.5)'),
+        ),
+        isEmpty,
+      );
+    });
+
+    test('a malformed value blocks with the color message, not a bare '
+        'error flag', () {
+      final hex = [colorField('brand')];
+      final errors = validate(
+        hex,
+        FormValues.initial(hex).set('brand', 'not a color'),
+        strings,
+      );
+
+      expect(errors, contains('brand'));
+      expect(errors['brand'], strings.fieldColor);
+    });
+
+    test('a value valid in another format is rejected — no cross-format '
+        'leniency', () {
+      // The mirror of the "never converts" property: a value that IS a real
+      // colour, just not in the DECLARED format, must still be treated as
+      // malformed. Accepting it here would be the validator quietly doing
+      // the conversion `ColorFieldWidget` explicitly never does.
+      final rgb = [colorField('brand', format: 'rgb')];
+      final errors = validate(
+        rgb,
+        FormValues.initial(rgb).set('brand', '#336699'),
+      );
+
+      expect(errors, contains('brand'));
+    });
+
+    test('fix round 1, Finding 3: an untouched malformed value is not '
+        'blocked — only what the user actually edited', () {
+      // Filament applies no server-side format validation to a bare
+      // ColorPicker, so a value already stored outside the four regexes
+      // (a legacy record, or CSS the docs regex doesn't cover — see the
+      // two examples below) is not something the server would reject
+      // either. Blocking it unconditionally would refuse the whole form
+      // over a field the user never touched.
+      final hex = [colorField('brand')];
+      final fromRecord = FormValues.initial(
+        hex,
+        from: const {'brand': '#aabbccdd'}, // 8-digit hex+alpha: valid CSS
+      );
+
+      expect(validate(hex, fromRecord, strings), isEmpty);
+
+      final rgb = [colorField('brand', format: 'rgb')];
+      final spaceSyntax = FormValues.initial(
+        rgb,
+        from: const {'brand': 'rgb(10 20 30)'}, // CSS space syntax
+      );
+
+      expect(validate(rgb, spaceSyntax, strings), isEmpty);
+    });
+
+    test('once the user edits it, the same malformed value blocks — dirty '
+        'is the gate, not a free pass', () {
+      final hex = [colorField('brand')];
+      // set() marks dirty even when re-writing the same value — the field
+      // is genuinely edited here, unlike the untouched case above.
+      final edited = FormValues.initial(
+        hex,
+        from: const {'brand': '#aabbccdd'},
+      ).set('brand', '#aabbccdd');
+
+      expect(validate(hex, edited, strings), contains('brand'));
+    });
+
+    test('an empty, non-required color field is not blocked', () {
+      final hex = [colorField('brand')];
+      expect(
+        validate(hex, FormValues.initial(hex).set('brand', null)),
+        isEmpty,
+      );
+    });
+
+    test('required still wins over the format check on an empty value', () {
+      final hex = [colorField('brand', required: true)];
+      final errors = validate(
+        hex,
+        FormValues.initial(hex).set('brand', ''),
+        strings,
+      );
+
+      expect(errors['brand'], strings.fieldRequired);
+    });
+
+    test('an rgb value is never accepted as its hex equivalent — the '
+        'never-converts property', () {
+      // Proves the claim by attempted violation: if the validator (or
+      // anything upstream) silently converted a declared `rgb` value into
+      // hex before checking it, this hex string would pass an `rgb` field.
+      // It must not.
+      final rgb = [colorField('brand', format: 'rgb')];
+      final errors = validate(
+        rgb,
+        // The hex equivalent of rgb(51, 102, 153).
+        FormValues.initial(rgb).set('brand', '#336699'),
+      );
+
+      expect(
+        errors,
+        contains('brand'),
+        reason: 'a hex string must not be accepted on a field declared rgb',
+      );
+    });
   });
 
   group('nested containers — must agree with FormValues.payloadFor', () {

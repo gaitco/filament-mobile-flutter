@@ -46,7 +46,7 @@ class SemanticBadge extends StatelessWidget {
     final colour = colorFor(colors[value]);
 
     return Chip(
-      label: Text(isolateGroupedDigits(value, Directionality.of(context))),
+      label: Text(isolateBidi(value, Directionality.of(context))),
       backgroundColor: colour?.withValues(alpha: 0.12),
       labelStyle: colour == null ? null : TextStyle(color: colour),
       visualDensity: VisualDensity.compact,

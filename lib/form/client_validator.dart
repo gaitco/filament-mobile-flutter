@@ -82,6 +82,34 @@ String? _validateField(
         : null;
   }
 
+  // Not a `rules`-driven check — SchemaWalker's `color` branch has nothing
+  // to say about the VALUE, only the format string (see `contract/
+  // README.md`'s "The color field") — so this reads [ColorComponent.format]
+  // off the component itself, the same split `_measure`'s `rules.numeric`
+  // keying draws below between what `rules` carries and what the node's own
+  // shape decides. `ColorComponent.isValid` is the exact check
+  // `ColorFieldWidget`'s swatch is driven from, so "malformed" cannot mean
+  // two different things in two places.
+  //
+  // Fix round 1, Finding 3: gated on `values.dirty`, unlike every check
+  // below it. Those mirror a rule the SERVER declared (`rules.email` etc.
+  // only exists because RuleExtractor emitted it, so the server genuinely
+  // rejects the value too) — this one does not, since Filament applies no
+  // format validation to a bare ColorPicker. An unrestricted check here
+  // would refuse to submit the WHOLE form over a legacy stored value
+  // (`#aabbccdd`, `rgb(10 20 30)` — both valid CSS the four Filament-
+  // documented regexes don't cover) that the user never touched, which is
+  // exactly the class of bug this docblock's own "never forbid one the
+  // server would accept" rule exists to prevent. Scoping to a value the
+  // user actually edited keeps the malformed-blocks-submission property for
+  // what it was meant for.
+  if (field is ColorComponent &&
+      value is String &&
+      values.dirty.contains(field.name) &&
+      !ColorComponent.isValid(value, field.format)) {
+    return strings.fieldColor;
+  }
+
   // Forward-looking: `SchemaWalker::rules()` (`SchemaWalker.php:340-361`)
   // never emits `email`, `url`, `regex` or `confirmed` today — none of them
   // appear in `contract/laravel-panel.json` — so these branches are dead

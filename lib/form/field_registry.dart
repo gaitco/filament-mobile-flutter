@@ -44,6 +44,16 @@ class FieldRegistry {
         component: component,
         state: state,
       ),
+      // `radio` parses onto the same SelectComponent as `select` (identical
+      // config shape, see SchemaComponent.fromJson), so it is discriminated
+      // by its `type` field here rather than by a class of its own — the
+      // widget differs even though the model does not. Matched before the
+      // bare SelectComponent() case below, which would otherwise catch it
+      // too.
+      SelectComponent(type: 'radio') => RadioFieldWidget(
+        component: component,
+        state: state,
+      ),
       SelectComponent() => SelectFieldWidget(
         component: component,
         state: state,
@@ -54,6 +64,11 @@ class FieldRegistry {
       ),
       DateComponent() => DateFieldWidget(component: component, state: state),
       FileComponent() => FileFieldWidget(component: component, state: state),
+      TagsComponent() => TagsFieldWidget(component: component, state: state),
+      KeyValueComponent() => KeyValueFieldWidget(
+        component: component,
+        state: state,
+      ),
       // `registry: this`, so a host's custom field types — and its overrides
       // of built-in ones — reach inside a repeater's rows too. A row used to
       // build through a fresh `FieldRegistry.defaults()`, which meant a host
@@ -85,11 +100,14 @@ class FieldRegistry {
     'number',
     'select',
     'multiselect',
+    'radio',
     'toggle',
     'checkbox',
     'date',
     'datetime',
     'file',
+    'tags',
+    'keyvalue',
     'repeater',
   };
 }

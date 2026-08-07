@@ -114,6 +114,57 @@ class DemoTransport implements FilamentTransport, FilamentUploadTransport {
             'columnSpan': 2,
             'config': {'readOnly': false},
           },
+          // Products only (P7): a radio field, so the example exercises
+          // RadioFieldWidget against a real form, not just a unit test.
+          if (key == 'products')
+            {
+              'type': 'radio',
+              'name': 'shipping_speed',
+              'label': 'Shipping speed',
+              'columnSpan': 2,
+              'rules': {'required': true},
+              'config': {
+                'options': [
+                  {'value': 'standard', 'label': 'Standard (3-5 days)'},
+                  {'value': 'express', 'label': 'Express (1-2 days)'},
+                ],
+              },
+            },
+          // Products only (P7): a tags field with a configured separator, so
+          // the example exercises TagsFieldWidget's chips and suggestions —
+          // the separator changes only what the *server* stores (see the
+          // Laravel README's Tags section); the client's value is always a
+          // List<String> regardless.
+          if (key == 'products')
+            {
+              'type': 'tags',
+              'name': 'labels',
+              'label': 'Labels',
+              'columnSpan': 2,
+              'config': {
+                'separator': ',',
+                'suggestions': ['new', 'sale', 'bestseller'],
+              },
+            },
+          // Products only (P7): a key/value field, so the example exercises
+          // KeyValueFieldWidget's add/remove and its per-cell edit gates.
+          if (key == 'products')
+            {
+              'type': 'keyvalue',
+              'name': 'attributes',
+              'label': 'Attributes',
+              'columnSpan': 2,
+              'config': {
+                'addable': true,
+                'deletable': true,
+                'editableKeys': true,
+                'editableValues': true,
+                'keyLabel': 'Attribute',
+                'valueLabel': 'Value',
+                'keyPlaceholder': 'e.g. Material',
+                'valuePlaceholder': 'e.g. Oak',
+              },
+            },
           // Products only: a JSON-column repeater (P6c), so the example
           // exercises RepeaterFieldWidget's add/remove affordances and
           // per-row validation against a real form, not just a unit test.
@@ -357,6 +408,11 @@ class DemoTransport implements FilamentTransport, FilamentUploadTransport {
           {'label': 'Brass', 'price': 89},
           {'label': 'Matte black', 'price': 95},
         ],
+        // P7: seeds the radio, tags and key/value fields so opening this
+        // record for edit shows all three prefilled rather than empty.
+        'shipping_speed': 'standard',
+        'labels': ['new', 'bestseller'],
+        'attributes': {'Material': 'Brass', 'Finish': 'Hand-rubbed'},
       },
       {
         ..._row(2, 'Linen Throw', 'Stonewashed, 130×170', 'Active', 54),

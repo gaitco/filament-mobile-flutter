@@ -196,6 +196,60 @@ class SelectFieldWidget extends StatelessWidget {
   }
 }
 
+/// `radio`. Same [SelectComponent] `select` parses onto — Radio shares
+/// Select's config shape server-side — but rendered as every option stacked
+/// and visible at once, never behind a dropdown tap: the design spec's
+/// stated reason a phone renders a Radio as itself rather than folding it
+/// into `SelectFieldWidget`.
+///
+/// `RadioGroup` is the non-deprecated way to drive a group of radios since
+/// Flutter 3.32 — `RadioListTile.groupValue`/`.onChanged` are the deprecated
+/// per-tile pair `SelectFieldWidget._multi` has no equivalent of, because a
+/// `CheckboxListTile` has no group at all.
+class RadioFieldWidget extends StatelessWidget {
+  const RadioFieldWidget({
+    required this.component,
+    required this.state,
+    super.key,
+  });
+
+  final SelectComponent component;
+  final FieldState state;
+
+  @override
+  Widget build(BuildContext context) {
+    return RadioGroup<Object?>(
+      groupValue: state.value,
+      onChanged: state.onChanged,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (component.label != null)
+            Text(
+              component.label!,
+              style: Theme.of(context).textTheme.labelMedium,
+            ),
+          for (final option in component.options)
+            RadioListTile<Object?>(
+              contentPadding: EdgeInsets.zero,
+              value: option.value,
+              title: Text(option.label),
+              // The hard gate, same rule this whole file states up top: a
+              // control that merely looks disabled while its selection stays
+              // live is how a value the server refused reaches the payload.
+              // `enabled: false` — not just a null onChanged — is what makes
+              // this tile itself refuse the tap, independent of the group's
+              // own onChanged above.
+              enabled: state.enabled,
+            ),
+          if (state.error != null) _ErrorText(state.error!),
+        ],
+      ),
+    );
+  }
+}
+
 /// `toggle` and `checkbox`. Same boolean value, different control.
 class BooleanFieldWidget extends StatelessWidget {
   const BooleanFieldWidget({
@@ -458,6 +512,346 @@ class _FileFieldWidgetState extends State<FileFieldWidget> {
   String _basename(String path) {
     final index = path.lastIndexOf('/');
     return index == -1 ? path : path.substring(index + 1);
+  }
+}
+
+/// `tags`. Chips for the tags already chosen, each with its own remove
+/// affordance, plus one text field that commits a tag on submit.
+///
+/// The value in form state is a genuine `List<String>` under this field's
+/// own name — never the delimited string a separator-configured panel
+/// persists. [TagsComponent.separator] is published so a renderer can say
+/// what the panel does; the join happens server-side at write time, so this
+/// widget neither builds nor parses one.
+///
+/// Removal is by INDEX into a freshly-built list, not by value: removing tag
+/// 2 rebuilds the list without position 1 and leaves the other two entries
+/// the same objects they were. A flat-state bug shows up here as the wrong
+/// tag vanishing, which is exactly what the three-tag test asserts against.
+///
+/// [TagsComponent.suggestions] are offered as tap-to-add chips, and only the
+/// ones not already chosen: a suggestion that re-adds a tag the field
+/// already carries is a control that does nothing. A field with no
+/// suggestions offers none rather than an empty row.
+///
+/// `state.enabled == false` is the same hard gate every field in this file
+/// applies: no remove affordance, no suggestion chips, and the text field's
+/// own `enabled` is false — a control that merely looks inert while its
+/// `onSubmitted` stays wired is how a value the server refuses reaches the
+/// payload.
+///
+/// ponytail: a per-TAG `422` (`labels.1`, from a
+/// `->nestedRecursiveRules(['max:20'])`) is two segments, and
+/// `ResourceFormProvider._applyServerErrors` maps only exact names and the
+/// repeater's three-segment shape — so it lands on the form banner, carrying
+/// the field's own label, rather than on the offending chip. Visible and
+/// attributable, never silent. Upgrade path when a chip needs to carry it:
+/// a two-segment branch there gated on the tags fields on screen, plus a
+/// `state.errors['$name.$index']` lookup here.
+class TagsFieldWidget extends StatefulWidget {
+  const TagsFieldWidget({
+    required this.component,
+    required this.state,
+    super.key,
+  });
+
+  final TagsComponent component;
+  final FieldState state;
+
+  @override
+  State<TagsFieldWidget> createState() => _TagsFieldWidgetState();
+}
+
+class _TagsFieldWidgetState extends State<TagsFieldWidget> {
+  final TextEditingController _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  /// Whatever the server or a previous edit left in state, read defensively:
+  /// a `null` (never edited, no default) and a non-string element both read
+  /// as "no tag there" rather than throwing on a form the user can see.
+  List<String> get _tags {
+    final raw = widget.state.value;
+    return raw is List ? raw.whereType<String>().toList() : const <String>[];
+  }
+
+  void _add(String raw) {
+    final tag = raw.trim();
+    _controller.clear();
+    // Blank and duplicate both add nothing: a duplicate would render two
+    // identical chips whose remove affordances a user cannot tell apart,
+    // and the panel's own tags input dedupes the same way.
+    if (tag.isEmpty || _tags.contains(tag)) return;
+    widget.state.onChanged([..._tags, tag]);
+  }
+
+  void _removeAt(int index) {
+    widget.state.onChanged(List<String>.of(_tags)..removeAt(index));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tags = _tags;
+    final enabled = widget.state.enabled;
+    final name = widget.component.name;
+    final unchosen = widget.component.suggestions.where(
+      (suggestion) => !tags.contains(suggestion),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (widget.component.label != null)
+          Text(
+            widget.component.label!,
+            style: Theme.of(context).textTheme.labelMedium,
+          ),
+        if (tags.isNotEmpty)
+          Wrap(
+            spacing: 8,
+            children: [
+              for (var index = 0; index < tags.length; index++)
+                Chip(
+                  key: ValueKey('tags.$name.chip.$index'),
+                  label: Text(tags[index]),
+                  // Null, not a disabled-looking callback: `Chip` renders no
+                  // delete affordance at all without one, which is what
+                  // "absent, not disabled" means for this control.
+                  onDeleted: enabled ? () => _removeAt(index) : null,
+                  deleteButtonTooltipMessage: widget.state.strings.removeItem,
+                  deleteIcon: Icon(
+                    Icons.close,
+                    key: ValueKey('tags.$name.remove.$index'),
+                    size: 18,
+                  ),
+                ),
+            ],
+          ),
+        TextField(
+          controller: _controller,
+          enabled: enabled,
+          onSubmitted: enabled ? _add : null,
+          decoration: InputDecoration(
+            hintText: widget.state.strings.tagHint,
+            helperText: widget.component.helperText,
+          ),
+        ),
+        if (enabled && unchosen.isNotEmpty)
+          Wrap(
+            spacing: 8,
+            children: [
+              for (final suggestion in unchosen)
+                ActionChip(
+                  key: ValueKey('tags.$name.suggest.$suggestion'),
+                  label: Text(suggestion),
+                  onPressed: () => _add(suggestion),
+                ),
+            ],
+          ),
+        if (widget.state.error != null) _ErrorText(widget.state.error!),
+      ],
+    );
+  }
+}
+
+/// `keyvalue`. One row per pair, each a key cell and a value cell side by
+/// side.
+///
+/// **Row identity is independent of the key string** (fix round 1, Finding
+/// 2). The wire value is a `Map<String, String>`, which cannot itself hold
+/// two rows sharing a key — but a user typing a new key routes through every
+/// intermediate value on the way to a final one, and two rows sharing a key
+/// (or the blank key a second Add produces) is a completely ordinary,
+/// recoverable mid-edit state, not data loss. So [_pairs] is **State**, seeded
+/// once from [FieldState.value] and mutated in place by [_commit] — not
+/// re-derived from the map on every build, the way the old Stateless version
+/// did. [_isOwnEcho] is what makes this safe: after a commit, [FieldState]
+/// round-trips the same (possibly collapsed) map back down through
+/// `didUpdateWidget`, and that echo must not stomp `_pairs` back to the
+/// collapsed shape — only a *genuinely external* change (a fresh record
+/// loaded, a `/state` refresh) does. Without this a second tap of Add did
+/// nothing (the second blank key collided with the first on the very next
+/// build) and renaming one row's key to another's silently deleted a row
+/// while the user was still typing.
+///
+/// **Absent, not disabled** (design spec, and fix round 1 Finding 1): the Add
+/// control renders only when [KeyValueComponent.addable], a row's Remove
+/// control only when [KeyValueComponent.deletable], and — now — a row's key
+/// or value cell renders as plain, unfocusable [Text] rather than a
+/// [_TextControl] when [KeyValueComponent.editableKeys] /
+/// [KeyValueComponent.editableValues] is false. The value itself is never
+/// absent (the row still has to show what it holds, which is why vendor's
+/// own view disables rather than removes its `<input>`) — it is the INPUT
+/// AFFORDANCE that goes away, the same distinction Add and Remove already
+/// draw.
+///
+/// `reorderable` is deliberately not read at all — it is not on the wire
+/// (design spec): the repeater publishes it and this widget has never
+/// offered one.
+class KeyValueFieldWidget extends StatefulWidget {
+  const KeyValueFieldWidget({
+    required this.component,
+    required this.state,
+    super.key,
+  });
+
+  final KeyValueComponent component;
+  final FieldState state;
+
+  @override
+  State<KeyValueFieldWidget> createState() => _KeyValueFieldWidgetState();
+}
+
+class _KeyValueFieldWidgetState extends State<KeyValueFieldWidget> {
+  late List<MapEntry<String, String>> _pairs = _fromValue(widget.state.value);
+
+  /// Whatever the server or a previous edit left in state, read
+  /// defensively: a `null` (never edited, no default) and a non-string
+  /// value both read as an empty pair rather than throwing on a form the
+  /// user can see — the same defensive posture [TagsFieldWidget] takes for
+  /// its own list.
+  static List<MapEntry<String, String>> _fromValue(Object? raw) {
+    if (raw is! Map) return const [];
+    return raw.entries
+        .map((e) => MapEntry(e.key.toString(), e.value?.toString() ?? ''))
+        .toList();
+  }
+
+  static Map<String, String> _asMap(List<MapEntry<String, String>> pairs) => {
+    for (final pair in pairs) pair.key: pair.value,
+  };
+
+  @override
+  void didUpdateWidget(covariant KeyValueFieldWidget old) {
+    super.didUpdateWidget(old);
+    if (widget.state.value != old.state.value &&
+        !_isOwnEcho(widget.state.value)) {
+      _pairs = _fromValue(widget.state.value);
+    }
+  }
+
+  /// True when [value] is exactly what [_commit] most recently reported
+  /// outward for the CURRENT `_pairs` — i.e. this update is our own edit
+  /// echoed back through [FieldState], not a change from anywhere else. A
+  /// duplicate or blank key collapses `_asMap(_pairs)` to fewer entries than
+  /// `_pairs` has rows, so this compares map content, not row count: two
+  /// rows sharing a key legitimately produce a shorter map than the row
+  /// list, and that must still read as "our own echo", not as an external
+  /// change to resync from.
+  bool _isOwnEcho(Object? value) {
+    if (value is! Map) return false;
+    final committed = _asMap(_pairs);
+    if (value.length != committed.length) return false;
+    for (final entry in committed.entries) {
+      if (value[entry.key]?.toString() != entry.value) return false;
+    }
+    return true;
+  }
+
+  void _commit(List<MapEntry<String, String>> next) {
+    setState(() => _pairs = next);
+    widget.state.onChanged(_asMap(next));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.state.enabled;
+    final name = widget.component.name;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (widget.component.label != null)
+          Text(
+            widget.component.label!,
+            style: Theme.of(context).textTheme.labelMedium,
+          ),
+        for (var index = 0; index < _pairs.length; index++)
+          _row(context, index),
+        if (widget.component.addable && enabled)
+          TextButton.icon(
+            key: ValueKey('keyvalue.$name.add'),
+            onPressed: () => _commit([..._pairs, const MapEntry('', '')]),
+            icon: const Icon(Icons.add),
+            label: Text(widget.state.strings.addItem),
+          ),
+        if (widget.state.error != null) _ErrorText(widget.state.error!),
+      ],
+    );
+  }
+
+  Widget _row(BuildContext context, int index) {
+    final name = widget.component.name;
+    final enabled = widget.state.enabled;
+    final pair = _pairs[index];
+
+    return Padding(
+      key: ValueKey('keyvalue.$name.row.$index'),
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: KeyedSubtree(
+              key: ValueKey('keyvalue.$name.key.$index'),
+              child: widget.component.editableKeys
+                  ? _TextControl(
+                      value: pair.key,
+                      enabled: enabled,
+                      decoration: InputDecoration(
+                        labelText: widget.component.keyLabel,
+                        hintText: widget.component.keyPlaceholder,
+                      ),
+                      onChanged: (value) {
+                        final next = List<MapEntry<String, String>>.of(_pairs);
+                        next[index] = MapEntry(value, pair.value);
+                        _commit(next);
+                      },
+                    )
+                  : Text(pair.key),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: KeyedSubtree(
+              key: ValueKey('keyvalue.$name.value.$index'),
+              child: widget.component.editableValues
+                  ? _TextControl(
+                      value: pair.value,
+                      enabled: enabled,
+                      decoration: InputDecoration(
+                        labelText: widget.component.valueLabel,
+                        hintText: widget.component.valuePlaceholder,
+                      ),
+                      onChanged: (value) {
+                        final next = List<MapEntry<String, String>>.of(_pairs);
+                        next[index] = MapEntry(pair.key, value);
+                        _commit(next);
+                      },
+                    )
+                  : Text(pair.value),
+            ),
+          ),
+          if (widget.component.deletable && enabled)
+            IconButton(
+              key: ValueKey('keyvalue.$name.remove.$index'),
+              tooltip: widget.state.strings.removeItem,
+              icon: const Icon(Icons.remove_circle_outline),
+              onPressed: () {
+                final next = List<MapEntry<String, String>>.of(_pairs)
+                  ..removeAt(index);
+                _commit(next);
+              },
+            ),
+        ],
+      ),
+    );
   }
 }
 

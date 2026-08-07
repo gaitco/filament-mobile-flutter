@@ -39,6 +39,7 @@ class FilamentStrings {
     this.addItem = 'Add item',
     this.removeItem = 'Remove',
     this.repeaterReadOnly = 'These items cannot be changed.',
+    this.tagHint = 'Add a tag',
     this.seeAll = 'See all',
     this.relationEmpty = 'Nothing here yet',
     this.relationFailed = 'Could not load',
@@ -131,6 +132,11 @@ class FilamentStrings {
   /// it is shown even when the host's own gates would otherwise allow
   /// editing.
   final String repeaterReadOnly;
+
+  /// The hint on a `tags` field's text input. A tag commits on submit only
+  /// — `splitKeys` is not on the wire — so this has to say what to do, not
+  /// merely name the field.
+  final String tagHint;
 
   /// The affordance on a `RelationSectionWidget` that opens the full,
   /// paginated relation — shown only when there is more to see than the

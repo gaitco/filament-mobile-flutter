@@ -11,6 +11,8 @@ part 'components/select_component.dart';
 part 'components/boolean_component.dart';
 part 'components/date_component.dart';
 part 'components/file_component.dart';
+part 'components/tags_component.dart';
+part 'components/keyvalue_component.dart';
 part 'components/repeater_component.dart';
 part 'components/layout_component.dart';
 part 'components/entry_component.dart';
@@ -112,10 +114,17 @@ sealed class SchemaComponent extends Equatable {
       'password' => TextComponent._fromJson(json, common),
       'number' => NumberComponent._fromJson(json, common, path),
       'select' ||
-      'multiselect' => SelectComponent._fromJson(json, common, path),
+      'multiselect' ||
+      // The config shape is identical to `select` — Radio shares Select's
+      // `Concerns\HasOptions` server-side (measured in vendor) — so one
+      // model class serves all three; only the widget differs. See
+      // RadioFieldWidget.
+      'radio' => SelectComponent._fromJson(json, common, path),
       'toggle' || 'checkbox' => BooleanComponent._fromJson(json, common),
       'date' || 'datetime' => DateComponent._fromJson(json, common, path),
       'file' => FileComponent._fromJson(json, common, path),
+      'tags' => TagsComponent._fromJson(json, common, path),
+      'keyvalue' => KeyValueComponent._fromJson(json, common, path),
       'repeater' => RepeaterComponent._fromJson(json, common, path, depth),
       'section' ||
       'grid' ||

@@ -1,5 +1,63 @@
 # Changelog
 
+## 0.6.0 — 2026-08-07
+
+**Radio, tags and key/value.** Three new field types render and edit
+correctly against the matching Laravel release.
+
+`radio` parses onto the same `SelectComponent` model `select`/`multiselect`
+already use (identical config shape — `config.options`), but renders through
+a new, distinct `RadioFieldWidget`: one stacked `RadioListTile` per option,
+single selection, honouring `state.enabled` and the server's `readOnly`.
+Matched in `FieldRegistry.build()`'s `switch` before the bare
+`SelectComponent()` case, since both patterns would otherwise match a radio
+node. A `radio` node never carries `config.optionsUrl`, however many options
+it has — see the Laravel README's Radio section for why.
+
+`tags` parses into a new `TagsComponent` (`separator`, `suggestions`) and
+renders through `TagsFieldWidget` — chips with a remove affordance, a text
+field committing on submit, `suggestions` offered when published. The value
+is always a `List<String>` in form state; `separator` is read for display
+only, never built or parsed client-side. New string,
+`FilamentStrings.tagHint` (`'Add a tag'`).
+
+`keyvalue` parses into a new `KeyValueComponent` (`addable`, `deletable`,
+`editableKeys`, `editableValues`, `keyLabel`, `valueLabel`,
+`keyPlaceholder`, `valuePlaceholder`; all four booleans default `true` when
+absent) and renders through `KeyValueFieldWidget`: one row per pair, Add
+when `addable`, Remove per row when `deletable`. A row whose key or value
+gate is off renders that cell as plain `Text`, never a disabled text field —
+the affordance is absent, not disabled, same rule this package applies
+everywhere else. Reuses the existing `FilamentStrings.addItem`/`.removeItem`
+rather than adding new ones. **Rows carry identity independent of their
+key** — `_pairs` is held as `List<MapEntry<String, String>>` state, seeded
+once and mutated in place rather than re-derived from the map on every
+build, fixed from a first cut where renaming a key into a transient
+collision with another row's key merged the two rows, and adding two rows in
+a row produced only one.
+
+Known weaknesses, stated in the README: `Radio::isInline()`,
+`splitKeys`/`tagPrefix`/`tagSuffix` are not on the wire; key/value has no
+reordering, matching the repeater; all four key/value gates are client
+hints — see the Laravel README's Key/value section for what "not enforced by
+the write path" means and its contrast with `disabled`, which this package's
+write path does enforce.
+
+**Mostly no break for a host, with one exception for a very specific
+shape.** `radio` reuses the existing `SelectComponent` — nothing new for a
+host matching on component *class*. `TagsComponent` and `KeyValueComponent`
+are new subtypes of the **sealed** `SchemaComponent` hierarchy: a host using
+`FieldRegistry` (the documented extension point) is unaffected, since
+`FieldRegistry.build()`'s own `switch` already has cases for both and a
+host's custom `_builders` entry still takes priority. **A host that wrote
+its own exhaustive `switch` directly over `SchemaComponent` — bypassing
+`FieldRegistry` — will not compile until it adds a case for each new
+subtype**, because a sealed hierarchy makes an unhandled case a compile
+error rather than a silently-skipped one. `radio`/`tags`/`keyvalue` also
+joined `FieldRegistry._builtInTypes`, which does not affect a host at all —
+it is read-only, informational, derived alongside a host's own registered
+types for `renderableTypes`.
+
 ## 0.5.1 — 2026-08-07
 
 Documentation only. No code, no API and no dependency changed; `0.5.0` and

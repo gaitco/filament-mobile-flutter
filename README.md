@@ -80,6 +80,9 @@ and link handling — is in [`example/`](example).
 | [Actions](#actions) | Buttons the server already authorised for this record |
 | [Upload](#upload) | Single-file upload, through an additive port your existing transport need not implement |
 | [Repeater](#repeater) | Add and remove rows, validated per row |
+| [Radio](#radio) | Real radio buttons, parsed off `select`'s own model |
+| [Tags](#tags) | Chips with a remove affordance, always a `List<String>` |
+| [Key/value](#keyvalue) | Add/remove pairs, key and value cells gated independently |
 | [Relations](#relations) | A child list on the record screen, "See all" opens the full paginated view |
 | [Rich text](#rich-text) | A real document — headings, lists, quotes, emphasis, links |
 | [Schema caching](#schema-caching) | Cold start renders from cache, revalidates behind it |
@@ -470,6 +473,94 @@ and asserts an ordinary repeater arrives editable while a relationship one
 and one with a non-round-tripping child do not. That test exists because the first cut of P6c had the server
 publishing the key for the refused case only, which rendered every ordinary
 repeater inert with both packages' own suites green.
+
+## Radio
+
+*Real radio buttons, parsed off `select`'s own model.*
+
+A `radio` node parses into `SelectComponent` — the same model type a
+`select`/`multiselect` node parses into, `radio` joining the `switch (type)`
+in `SchemaComponent.fromJson` (`schema_component.dart`), alongside `select`
+and `multiselect` — but renders through a distinct, new
+`RadioFieldWidget`, never `SelectFieldWidget`. One stacked
+`RadioListTile` per option, single selection, `state.enabled` and the
+server's `readOnly` both honoured — no dropdown, no search field, because a
+`radio` node never carries `config.optionsUrl` (see the Laravel README's
+Radio section for why an over-cap radio inlines every option instead).
+
+### Known weaknesses, stated now
+
+- **`Radio::isInline()` is not on the wire.** Options always stack one per
+  row, the treatment `RadioFieldWidget` uses unconditionally.
+
+## Tags
+
+*Chips with a remove affordance; the value is always a `List<String>`.*
+
+A `tags` node parses into `TagsComponent` (`separator`, `suggestions`) and
+renders through `TagsFieldWidget`: existing tags as chips with a remove
+affordance, a text field that commits a new tag on submit, and
+`suggestions` offered when the field published any. `separator` is read for
+display only — a client never builds or parses the delimited form; the
+value in form state is always a `List<String>`, exactly as the server
+publishes and expects it, separator-configured or not.
+
+One documented exception, on the server's side: a **relation row** whose
+child model is served by zero or by several opted-in resources has no
+resolvable owner, so the server cannot know the separator and publishes the
+stored delimited `String` rather than guessing a split (see
+`contract/README.md`'s Tags section). `_TagsFieldWidgetState._tags` already
+tolerates it — a non-`List` reads as no tags rather than throwing — so the
+row renders empty chips instead of crashing. Stated here because "always a
+`List<String>`" is otherwise the claim a host would trust.
+
+The new `FilamentStrings.tagHint` (`'Add a tag'`) labels the input, English
+default as always — a host that upgrades and changes nothing still
+compiles and still runs.
+
+### Known weaknesses, stated now
+
+- **`splitKeys`, `tagPrefix` and `tagSuffix` are not on the wire.** A tag
+  commits on submit only; this widget has no prefix/suffix presentation to
+  reproduce.
+
+## Key/value
+
+*Add and remove pairs; a row's key or value cell renders as text, not a
+disabled input, when its gate is off.*
+
+A `keyvalue` node parses into `KeyValueComponent` (`addable`, `deletable`,
+`editableKeys`, `editableValues`, `keyLabel`, `valueLabel`,
+`keyPlaceholder`, `valuePlaceholder` — all four booleans default to `true`
+when absent, matching the server's own default) and renders through
+`KeyValueFieldWidget`: one row per pair, an **Add** control when `addable`,
+a **Remove** per row when `deletable`. Two pre-existing strings from the
+Repeater section above are reused rather than duplicated:
+`FilamentStrings.addItem` and `.removeItem`.
+
+**A gate that is off makes its control absent, not disabled.** A row whose
+key is not editable renders its key as plain, unfocusable `Text`, never a
+greyed-out text field — same rule this package applies to every other
+affordance a server gate turns off. `editableValues` governs the value cell
+the identical way, independently: one gate off and the other on renders a
+row with an editable value beside a read-only key, which is a legitimate
+combination the server can configure and this widget must render correctly.
+
+**Rows carry identity independent of their key**, which the first cut of
+this widget got wrong. `_pairs` is held as `List<MapEntry<String, String>>`
+state, seeded once and mutated in place rather than re-derived from the
+map on every build — so renaming a key that transiently collides with
+another row's key no longer merges the two rows into one, and adding two
+rows in a row produces two rows, not one.
+
+### Known weaknesses, stated now
+
+- **No reordering**, matching the repeater — this widget has never offered
+  one for either array-valued field.
+- **All four gates are client hints.** See the Laravel README's Key/value
+  section for what "not enforced by the write path" means in practice, and
+  for the contrast with `disabled`, which this package's write path *does*
+  enforce.
 
 ## Relations
 

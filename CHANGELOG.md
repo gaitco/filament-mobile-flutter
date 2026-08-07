@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.1 — 2026-08-07
+
+Documentation only. No code, no API and no dependency changed; `0.5.0` and
+`0.5.1` are byte-identical in `lib/`.
+
+The README was restructured to read as a landing page rather than a feature log
+— each release had appended its own section, leaving the file ordered by ship
+date and opening on a caveat before it said what the package does. It now leads
+with **Install** and a **Quick start** (type-checked against the real API), then
+a **What ships** table, then the same per-feature reference as before with
+nothing removed. `FilamentTransport`'s two runtime surprises — reads throw while
+writes do not, and a 401 is not a broken server — now sit under *Implementing
+`FilamentTransport`*, where they apply.
+
+Published as its own version because pub.dev renders the README from the
+published archive: the improved page cannot reach pub.dev without one.
+
 ## 0.5.0 — 2026-08-07
 
 **Upload.** A single-file `FileUpload` field is editable from the phone,

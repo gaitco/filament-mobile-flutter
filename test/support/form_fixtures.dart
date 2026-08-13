@@ -47,6 +47,7 @@ class FakeSource implements ResourceDataSource {
   final OptionsPage optionsResponse;
 
   int optionsCalls = 0;
+  String? lastOptionsField;
   String? lastOptionsQuery;
   Map<String, dynamic> lastOptionsValues = const {};
 
@@ -67,6 +68,7 @@ class FakeSource implements ResourceDataSource {
     required String query,
   }) {
     optionsCalls++;
+    lastOptionsField = field;
     lastOptionsQuery = query;
     lastOptionsValues = values;
 
@@ -181,6 +183,31 @@ class FakeSource implements ResourceDataSource {
     RelationDescriptor relation, {
     int page = 1,
   }) async => throw UnimplementedError();
+
+  @override
+  Future<WriteResult> createRelation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation,
+    Map<String, dynamic> values,
+  ) => throw UnimplementedError();
+
+  @override
+  Future<WriteResult> updateRelation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation,
+    Object childId,
+    Map<String, dynamic> values,
+  ) => throw UnimplementedError();
+
+  @override
+  Future<WriteResult> deleteRelation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation,
+    Object childId,
+  ) => throw UnimplementedError();
 
   @override
   Future<PaginatedRecords> list(

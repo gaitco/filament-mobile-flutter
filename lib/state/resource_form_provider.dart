@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../data/options_page.dart';
+import '../data/relation_submit_target.dart';
 import '../data/resource_data_source.dart';
 import '../data/upload_result.dart';
 import '../data/write_result.dart';
@@ -40,6 +41,7 @@ class ResourceFormProvider extends ChangeNotifier {
     required this.resource,
     required this.strings,
     this.recordId,
+    this.submitTarget,
     this.stateDebounce = const Duration(milliseconds: 400),
   }) : _source = source,
        _components = resource.form,
@@ -50,7 +52,19 @@ class ResourceFormProvider extends ChangeNotifier {
   final FilamentStrings strings;
 
   /// Null means create. Anything else is the record being edited.
+  ///
+  /// With a [submitTarget] this is the relation CHILD's id: it seeds the
+  /// form through the child resource's own record read, and becomes the
+  /// `{child}` segment of the relation update URL.
   final Object? recordId;
+
+  /// Null — every form outside a relation manager — submits to [resource]'s
+  /// own endpoints exactly as before. Non-null redirects ONLY the write:
+  /// rendering, seeding, `/state` and `/options` all stay on the child
+  /// resource, because the child resource's form is what is on screen. This
+  /// is the whole write-target override (P9); nothing else about the form
+  /// knows it is editing a relation row.
+  final RelationSubmitTarget? submitTarget;
 
   final Duration stateDebounce;
 
@@ -271,9 +285,29 @@ class ResourceFormProvider extends ChangeNotifier {
     final payload = _values.payloadFor(_components);
     WriteResult result;
     try {
-      result = recordId == null
-          ? await _source.create(resource.key, payload)
-          : await _source.update(resource.key, recordId!, payload);
+      final target = submitTarget;
+      // One branch, two URL families: the relation target changes WHERE the
+      // payload goes, never what it is — validation, the 422 mapping and the
+      // banner below are shared verbatim, because the server keys a relation
+      // write's 422 by the same child-form field names this screen renders.
+      result = target == null
+          ? recordId == null
+                ? await _source.create(resource.key, payload)
+                : await _source.update(resource.key, recordId!, payload)
+          : recordId == null
+          ? await _source.createRelation(
+              target.resourceKey,
+              target.recordId,
+              target.relation,
+              payload,
+            )
+          : await _source.updateRelation(
+              target.resourceKey,
+              target.recordId,
+              target.relation,
+              recordId!,
+              payload,
+            );
     } catch (e) {
       // create/update return their 4xx as data; only a transport failure
       // throws, and its message is already fit for the user.

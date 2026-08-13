@@ -16,12 +16,18 @@ class ResourceCard extends StatelessWidget {
     required this.layout,
     required this.record,
     this.onTap,
+    this.trailing,
     super.key,
   });
 
   final CardLayout layout;
   final ResourceRecord record;
   final VoidCallback? onTap;
+
+  /// Pinned to the row's trailing edge — today only `RelationListScreen`'s
+  /// per-row edit/delete affordances (P9). Null everywhere else, and the
+  /// card's layout is untouched in that case.
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -70,9 +76,8 @@ class ResourceCard extends StatelessWidget {
                         spacing: 6,
                         children: [
                           for (final badge in layout.badges)
-                            if (_text(badge.field, context, isolate: false)
-                                case final value?)
-                              SemanticBadge(value: value, colors: badge.colors),
+                            if (_badge(badge, context) case final widget?)
+                              widget,
                         ],
                       ),
                     ],
@@ -86,11 +91,34 @@ class ResourceCard extends StatelessWidget {
                   ],
                 ),
               ),
+              // Inside the InkWell, so the row's own onTap still owns the
+              // card body — a trailing control (an IconButton) hit-tests
+              // itself above the ink response.
+              if (trailing != null) trailing!,
             ],
           ),
         ),
       ),
     );
+  }
+
+  /// One badge slot's widget, or null when the field has no renderable value.
+  ///
+  /// A boolean value becomes a [BooleanBadge] — detected on the raw typed
+  /// value here, upstream of [_text]'s `toString()`: after stringification a
+  /// real bool and the string "true" are indistinguishable, and the string
+  /// must keep rendering as an ordinary text badge. Every other type takes
+  /// the text path exactly as before.
+  Widget? _badge(CardBadge badge, BuildContext context) {
+    if (record.get<Object>(badge.field) case final raw? when raw is bool) {
+      return BooleanBadge(value: raw, colors: badge.colors);
+    }
+
+    if (_text(badge.field, context, isolate: false) case final value?) {
+      return SemanticBadge(value: value, colors: badge.colors);
+    }
+
+    return null;
   }
 
   /// [formatDates] gates the ISO-8601 → localised-short-date rewrite below —

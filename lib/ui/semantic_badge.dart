@@ -53,3 +53,41 @@ class SemanticBadge extends StatelessWidget {
     );
   }
 }
+
+/// A boolean badge — Filament's boolean-column idiom (a check or a cross),
+/// coloured through the same semantic map a text badge uses.
+///
+/// A badge slot bound to a boolean column used to render the literal word
+/// `true` (HANDOFF's parked card-badge gap): the wire carries the value's
+/// real JSON type, and a bool is the one type a text chip cannot honestly
+/// label. Detection happens upstream, on the record's raw typed value —
+/// after `toString()` a real bool and the string "true" are
+/// indistinguishable, and the string must stay a text badge.
+class BooleanBadge extends StatelessWidget {
+  const BooleanBadge({required this.value, required this.colors, super.key});
+
+  final bool value;
+
+  /// Value → semantic colour name, straight from the contract — the same map
+  /// [SemanticBadge.colors] is. Both key spellings are honoured: JSON object
+  /// keys are strings and `true` as a PHP array key becomes `1`, so a panel's
+  /// map may key the colours `'true'/'false'` or `'1'/'0'`.
+  final Map<String, String> colors;
+
+  @override
+  Widget build(BuildContext context) {
+    final colour =
+        SemanticBadge.colorFor(
+          colors[value ? 'true' : 'false'] ?? colors[value ? '1' : '0'],
+        ) ??
+        // Unmapped, the idiom still has a default reading: a check is a
+        // success, a cross is neutral — never an alarming colour.
+        SemanticBadge.colorFor(value ? 'success' : 'gray');
+
+    return Chip(
+      label: Icon(value ? Icons.check : Icons.close, size: 16, color: colour),
+      backgroundColor: colour?.withValues(alpha: 0.12),
+      visualDensity: VisualDensity.compact,
+    );
+  }
+}

@@ -115,6 +115,58 @@ void main() {
     },
   );
 
+  testWidgets('a boolean badge value renders as a check, never the word '
+      '"true"', (tester) async {
+    // HANDOFF's parked card-badge gap: a badge slot bound to a boolean
+    // column used to print the literal word `true`. Detection is on the raw
+    // typed value, so the string "true" below stays a text badge while the
+    // bool gets Filament's boolean-column idiom.
+    await tester.pumpWidget(
+      wrap(
+        ResourceCard(
+          layout: const CardLayout(
+            titleField: 'name',
+            badges: [
+              CardBadge(field: 'is_active', colors: {'1': 'success'}),
+              CardBadge(field: 'note'),
+            ],
+          ),
+          record: ResourceRecord.fromJson(const {
+            'id': 1,
+            'name': 'x',
+            'is_active': true,
+            'note': 'true',
+          }, 'id'),
+        ),
+      ),
+    );
+
+    expect(find.byIcon(Icons.check), findsOneWidget);
+    // The string "true" keeps the text treatment — only the bool changed.
+    expect(find.text('true'), findsOneWidget);
+  });
+
+  testWidgets('a false boolean badge renders as a cross', (tester) async {
+    await tester.pumpWidget(
+      wrap(
+        ResourceCard(
+          layout: const CardLayout(
+            titleField: 'name',
+            badges: [CardBadge(field: 'is_active')],
+          ),
+          record: ResourceRecord.fromJson(const {
+            'id': 1,
+            'name': 'x',
+            'is_active': false,
+          }, 'id'),
+        ),
+      ),
+    );
+
+    expect(find.byIcon(Icons.close), findsOneWidget);
+    expect(find.text('false'), findsNothing);
+  });
+
   testWidgets('a field that resolves to null is simply omitted', (
     tester,
   ) async {

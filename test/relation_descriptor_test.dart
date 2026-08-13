@@ -108,6 +108,47 @@ void main() {
 
       expect(a, b);
     });
+
+    test(
+      'parses the child resource key when the server publishes one (P9)',
+      () {
+        final relation = RelationDescriptor.fromJson(const {
+          'key': 'tags',
+          'label': 'Tags',
+          'card': {
+            'title': {'field': 'name'},
+          },
+          'resource': 'tags',
+        }, 'r');
+
+        expect(relation.resource, 'tags');
+      },
+    );
+
+    test('an absent, null or wrong-typed resource key reads as read-only, '
+        'never throws', () {
+      // Absent: a server predating P9. Null: a server whose relation child
+      // resolves to zero or several mobile resources encodes it as absent —
+      // and a client must tolerate the literal too. Wrong type: `opt`'s
+      // standing licence, a scalar the server widened. All three are the
+      // same statement — read-only — and none is a malformed relation.
+      for (final node in [
+        const <String, dynamic>{},
+        const {'resource': null},
+        const {'resource': 42},
+      ]) {
+        final relation = RelationDescriptor.fromJson({
+          'key': 'tags',
+          'label': 'Tags',
+          'card': {
+            'title': {'field': 'name'},
+          },
+          ...node,
+        }, 'r');
+
+        expect(relation.resource, isNull, reason: 'node: $node');
+      }
+    });
   });
 
   group('ResourceSchema.relations', () {

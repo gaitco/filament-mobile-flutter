@@ -3,6 +3,7 @@ export 'data/action_result.dart';
 export 'data/paginated_records.dart';
 export 'data/record_action.dart';
 export 'data/record_can.dart';
+export 'data/relation_submit_target.dart';
 export 'data/resource_data_source.dart';
 export 'data/resource_record.dart';
 export 'data/rest_resource_data_source.dart';

@@ -5,6 +5,7 @@ import '../data/resource_record.dart';
 import '../ports/filament_strings.dart';
 import '../schema/relation_descriptor.dart';
 import '../state/load_status.dart';
+import '../state/resource_view_provider.dart';
 import 'resource_card.dart';
 
 /// One published relation, rendered on the record-detail screen as a
@@ -37,6 +38,7 @@ class RelationSectionWidget extends StatefulWidget {
     required this.relation,
     required this.recordId,
     required this.fetch,
+    this.parent,
     this.strings = const FilamentStrings(),
     this.onSeeAllTap,
     super.key,
@@ -54,6 +56,15 @@ class RelationSectionWidget extends StatefulWidget {
   /// section only ever shows the first page); `RelationListScreen` reuses the
   /// same signature to page further.
   final Future<PaginatedRecords> Function({int page}) fetch;
+
+  /// The provider holding the record this section hangs off (P9). When it
+  /// finishes a reload — a record action that changed relation membership is
+  /// the case that motivated this — the section re-fetches its rows through
+  /// [fetch], so stale membership never survives the action that changed it.
+  /// Null keeps the load-once-in-initState behaviour: a caller without the
+  /// provider (a test, a host composing the widget itself) loses the refresh,
+  /// nothing else.
+  final ResourceViewProvider? parent;
 
   final FilamentStrings strings;
 
@@ -75,7 +86,35 @@ class _RelationSectionWidgetState extends State<RelationSectionWidget> {
   @override
   void initState() {
     super.initState();
+    widget.parent?.addListener(_onParentReloaded);
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  @override
+  void didUpdateWidget(RelationSectionWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // A swapped provider leaves the old subscription dead on arrival: the new
+    // one would never be heard and the old one would fire into a widget that
+    // no longer follows it.
+    if (oldWidget.parent != widget.parent) {
+      oldWidget.parent?.removeListener(_onParentReloaded);
+      widget.parent?.addListener(_onParentReloaded);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.parent?.removeListener(_onParentReloaded);
+    super.dispose();
+  }
+
+  /// Reloads only once the parent's reload has COMPLETED. The provider
+  /// notifies twice per load — once going `loading`, once settling — and
+  /// fetching on the first would race the record the rows belong to. This is
+  /// a listener callback, not a build: [_load] sets state asynchronously,
+  /// never during a build phase.
+  void _onParentReloaded() {
+    if (widget.parent?.status.isSuccess ?? false) _load();
   }
 
   Future<void> _load() async {

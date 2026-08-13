@@ -26,7 +26,11 @@ const _relation = RelationDescriptor(
 /// than repeating page one, and records the page argument each call actually
 /// carried.
 class _RelationSource implements ResourceDataSource {
-  _RelationSource({this.error, this.failOnPage});
+  _RelationSource({
+    this.error,
+    this.failOnPage,
+    this.writeResult = const WriteSuccess({}),
+  });
 
   final Object? error;
 
@@ -56,6 +60,52 @@ class _RelationSource implements ResourceDataSource {
       ],
       meta: PageMeta(currentPage: page, lastPage: 2, perPage: 2, total: 4),
     );
+  }
+
+  /// The relation writes record which one fired and with whose coordinates,
+  /// so a test can assert the provider aimed at the right endpoint; the
+  /// result each returns is settable per test ([writeResult]).
+  final List<String> writes = [];
+  Object? lastChildId;
+  Map<String, dynamic>? lastValues;
+  WriteResult writeResult;
+
+  @override
+  Future<WriteResult> createRelation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation,
+    Map<String, dynamic> values,
+  ) async {
+    writes.add('create');
+    lastValues = values;
+    return writeResult;
+  }
+
+  @override
+  Future<WriteResult> updateRelation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation,
+    Object childId,
+    Map<String, dynamic> values,
+  ) async {
+    writes.add('update');
+    lastChildId = childId;
+    lastValues = values;
+    return writeResult;
+  }
+
+  @override
+  Future<WriteResult> deleteRelation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation,
+    Object childId,
+  ) async {
+    writes.add('delete');
+    lastChildId = childId;
+    return writeResult;
   }
 
   @override
@@ -277,5 +327,88 @@ void main() {
 
     expect(source.pages.last, 1);
     expect(provider.records.map((r) => r.id), [10, 11]);
+  });
+
+  group('row writes (P9)', () {
+    test('create() posts through the relation endpoint and refreshes the '
+        'loaded page on success', () async {
+      final source = _RelationSource();
+      final provider = _providerFor(source);
+      await provider.load();
+      expect(source.pages, [1]);
+
+      final result = await provider.create({'name': 'sale'});
+
+      expect(result, isA<WriteSuccess>());
+      expect(source.writes, ['create']);
+      expect(source.lastValues, {'name': 'sale'});
+      // The write changed this page's membership; the provider re-fetches
+      // page one through its own refresh rather than editing rows the server
+      // never confirmed.
+      expect(source.pages, [1, 1]);
+      expect(provider.status, LoadStatus.success);
+    });
+
+    test('update() carries the child id — the relation\'s recordKey value, '
+        'here a slug — and refreshes on success', () async {
+      final source = _RelationSource();
+      final provider = _providerFor(source);
+      await provider.load();
+
+      final result = await provider.update('sale', {'name': 'clearance'});
+
+      expect(result, isA<WriteSuccess>());
+      expect(source.writes, ['update']);
+      expect(source.lastChildId, 'sale');
+      expect(source.pages, [1, 1]);
+    });
+
+    test(
+      'delete() refreshes on WriteGone too — the row is gone either way',
+      () async {
+        final source = _RelationSource(
+          writeResult: const WriteGone('No record.'),
+        );
+        final provider = _providerFor(source);
+        await provider.load();
+
+        final result = await provider.delete('sale');
+
+        expect(result, isA<WriteGone>());
+        expect(source.pages, [1, 1]);
+      },
+    );
+
+    test('a 422 comes back as WriteInvalid keyed by field and does NOT '
+        'refresh — nothing changed server-side', () async {
+      final source = _RelationSource(
+        writeResult: const WriteInvalid({
+          'name': ['The name field is required.'],
+        }),
+      );
+      final provider = _providerFor(source);
+      await provider.load();
+
+      final result = await provider.create(const {});
+
+      expect(result, isA<WriteInvalid>());
+      expect((result as WriteInvalid).errors['name'], [
+        'The name field is required.',
+      ]);
+      expect(source.pages, [1], reason: 'no write landed, so no re-fetch');
+    });
+
+    test('a denial comes back as WriteDenied and does NOT refresh', () async {
+      final source = _RelationSource(
+        writeResult: const WriteDenied('This action is unauthorized.'),
+      );
+      final provider = _providerFor(source);
+      await provider.load();
+
+      final result = await provider.delete('sale');
+
+      expect(result, isA<WriteDenied>());
+      expect(source.pages, [1]);
+    });
   });
 }

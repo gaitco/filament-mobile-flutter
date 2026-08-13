@@ -141,10 +141,14 @@ void main() {
       isFalse,
       reason: 'an ordinary JSON-column repeater must arrive editable',
     );
+    // P9/B2: a relationship repeater now writes through Filament's own
+    // `saveRelationships()`, so it arrives editable like any other. The
+    // wholesale-replacement caveat (keyless state means delete-all-then-
+    // recreate) is a server-side concern, pinned by RepeaterWriteTest there.
     expect(
       repeaters['tag_rows']!.readOnly,
-      isTrue,
-      reason: 'a relationship repeater is refused this slice',
+      isFalse,
+      reason: 'a relationship repeater now saves via its relationship',
     );
     // P6c close-out, Finding 1. `guarded_rows` holds a `Hidden` in its item
     // template, so no rule ever names that child and a whole-array write

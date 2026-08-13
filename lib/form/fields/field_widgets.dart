@@ -1350,6 +1350,19 @@ class RepeaterFieldWidget extends StatelessWidget {
       // into. Every editable child shape gets its error through `error`.
       error: state.errors['${component.name}.$index.$name'],
       enabled: !_inert && !child.disabled && child.writable,
+      // A remote select inside a row gets the same lookup a top-level one
+      // does, bound to the CHILD's own name — `state.searchOptions` is a
+      // closure already bound to the repeater's name, so the unbound
+      // per-field variant is the only one a row can use. Without this the
+      // row's select rendered an empty dropdown that never said why (ledger
+      // L18). The server resolves the field by bare name; whether its own
+      // lookup descends into a repeater is the server's half of the story.
+      searchOptions: state.searchOptionsFor == null
+          ? null
+          : (query) => state.searchOptionsFor!(name, query),
+      // Forwarded for the same reason it exists: a deeper container (a
+      // host-built one, or a nested repeater) must not lose the path again.
+      searchOptionsFor: state.searchOptionsFor,
       strings: state.strings,
     );
 

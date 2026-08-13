@@ -21,6 +21,13 @@ class _Opaque {
   String toString() => 'opaque failure';
 }
 
+/// An [Error] with no `message` member — most of Dart's own Error subtypes
+/// have one, so the fallback path needs a type that genuinely lacks it.
+class _BareError extends Error {
+  @override
+  String toString() => 'bare error';
+}
+
 void _noop() {}
 
 void main() {
@@ -130,6 +137,30 @@ void main() {
       expect(messageOf(_HostFailure('تعذّر الاتصال')), 'تعذّر الاتصال');
       expect(messageOf(_Opaque()), 'opaque failure');
     });
+
+    test('messageOf reads the `message` of an Error too, not only of an '
+        'Exception', () {
+      // The P1 read-path spec parked a ruling to consult `message` only when
+      // `error is! Error`, following Dart's own "an Error is a programmer
+      // bug" convention. That narrowing never shipped, and this test pins
+      // why it must not: several of Dart's own Error subtypes — ArgumentError,
+      // StateError, UnsupportedError — carry a genuine, human-legible
+      // `message` that their toString() buries behind a type prefix
+      // ("Invalid argument (…): …"), the exact leak FilamentTransportException
+      // exists to keep off the screen.
+      expect(messageOf(ArgumentError('bad arg')), 'bad arg');
+      expect(messageOf(StateError('bad state')), 'bad state');
+    });
+
+    test(
+      'messageOf falls back to toString() for an Error with no `message`',
+      () {
+        // The dynamic lookup throws NoSuchMethodError on a type with no
+        // `message` member; the catch is what makes that a fallback rather than
+        // a crash inside an error handler.
+        expect(messageOf(_BareError()), 'bare error');
+      },
+    );
 
     test('a 401 exception carries its status', () {
       const e = FilamentTransportException('signed out', statusCode: 401);

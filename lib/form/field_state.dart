@@ -15,6 +15,7 @@ class FieldState {
     this.errors = const {},
     this.enabled = true,
     this.searchOptions,
+    this.searchOptionsFor,
     this.filePicker,
     this.uploadFile,
     this.strings = const FilamentStrings(),
@@ -43,6 +44,18 @@ class FieldState {
   /// and so every non-select field ignores it. Null means the options are
   /// already on the component.
   final Future<OptionsPage> Function(String query)? searchOptions;
+
+  /// The per-field variant of [searchOptions], for the one caller that
+  /// cannot use it: a **container** field whose children each need a lookup
+  /// bound to the CHILD's own name. [searchOptions] is a closure already
+  /// bound to the field it was built for, and a closure cannot be rebound —
+  /// handing a repeater's [searchOptions] to a row's select would query the
+  /// repeater's own name, which the options endpoint rightly refuses. A
+  /// container (today only `RepeaterFieldWidget`) calls this with the child's
+  /// name instead; leaf fields keep reading [searchOptions], and a form that
+  /// never nests a remote select inside a repeater can ignore this entirely.
+  final Future<OptionsPage> Function(String field, String query)?
+  searchOptionsFor;
 
   /// Picks a file for a `FileComponent`; null when the host gave
   /// `ResourceFormScreen` no picker, which is `FileFieldWidget`'s signal to

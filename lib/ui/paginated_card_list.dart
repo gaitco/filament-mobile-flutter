@@ -59,6 +59,7 @@ class PaginatedCardList extends StatelessWidget {
     required this.onLoadMoreRetry,
     required this.controller,
     this.onRecordTap,
+    this.rowTrailing,
     super.key,
   });
 
@@ -82,6 +83,11 @@ class PaginatedCardList extends StatelessWidget {
   final ScrollController controller;
   final void Function(ResourceRecord record)? onRecordTap;
 
+  /// Builds a row's trailing widget (edit/delete affordances on a relation
+  /// list — P9), or returns null for a row with none. Null itself — every
+  /// resource list — renders exactly the cards this widget always has.
+  final Widget? Function(ResourceRecord record)? rowTrailing;
+
   @override
   Widget build(BuildContext context) {
     return RefreshIndicator(
@@ -99,6 +105,7 @@ class PaginatedCardList extends StatelessWidget {
             layout: layout,
             record: record,
             onTap: onRecordTap == null ? null : () => onRecordTap!(record),
+            trailing: rowTrailing?.call(record),
           );
         },
       ),

@@ -121,6 +121,31 @@ class FakeSource implements ResourceDataSource {
   }
 
   @override
+  Future<WriteResult> createRelation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation,
+    Map<String, dynamic> values,
+  ) => throw UnimplementedError();
+
+  @override
+  Future<WriteResult> updateRelation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation,
+    Object childId,
+    Map<String, dynamic> values,
+  ) => throw UnimplementedError();
+
+  @override
+  Future<WriteResult> deleteRelation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation,
+    Object childId,
+  ) => throw UnimplementedError();
+
+  @override
   Future<WriteResult> create(String resourceKey, Map<String, dynamic> values) =>
       throw UnimplementedError();
 

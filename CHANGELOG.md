@@ -1,5 +1,91 @@
 # Changelog
 
+## 0.8.0 — 2026-08-13
+
+**Relation writes, against the matching Laravel 0.6.0.** A relation whose
+descriptor carries a `resource` key — the server publishes one only when
+exactly one registered resource owns the related model — is writable end to
+end. `RelationDescriptor.resource` parses defensively: absent, null or
+wrong-typed all read as *absent*, read-only, never a throw — the same
+absence-means-unavailable rule `readOnly` already follows. Three members
+join `ResourceDataSource` beside `relation()`:
+`createRelation`/`updateRelation`/`deleteRelation`, with REST
+implementations in `RestResourceDataSource` keyed off `relation.recordKey`
+exactly as the read is. **This is a breaking change for a host with its own
+`ResourceDataSource` implementation — it will not compile until it adds the
+three methods.** A host on `RestResourceDataSource` needs no change; the
+"member, not port" reasoning `relation()` itself shipped with applies, and
+`lib/ports/*` stays untouched.
+
+The form a relation row is edited in is the **child resource's own**
+`ResourceFormScreen` — only the write target changes, through one small
+value: `RelationSubmitTarget` (parent resource key, parent record id, the
+relation) handed to the new `ResourceFormProvider.submitTarget`. Null —
+every form outside a relation — submits exactly as before; non-null
+redirects only the write, so validation, the `422` mapping and the error
+banner are shared verbatim, which works because the server keys a relation
+write's `422` by the same child-form field names the screen renders.
+`RelationListScreen` takes an optional `childResource` and gates every
+affordance off its published `permissions`: Add on `create`, per-row edit
+and delete on `update`/`delete`, and a null `childResource` or a false flag
+renders **no control at all** — absence, not disabled. The delete confirm
+dialog mirrors `ResourceViewScreen`'s own, reusing the existing
+`deleteConfirm*` strings. The per-row controls arrive through two new
+general slots — `ResourceCard.trailing` and `PaginatedCardList.rowTrailing`
+— rather than a relation-specific card fork. And `RelationSectionWidget`
+takes an optional `parent` provider: the section now reloads when the
+parent record finishes a reload, closing the stale-rows-after-an-action
+weakness, and listens for a **success** notification only — a failed parent
+reload leaves good rows on screen rather than blanking them behind the
+parent's error.
+
+**The one-sided rule-hint corner is closed.** This client has parsed
+`rules.url`, `rules.regex` and `rules.confirmed` since the validator was
+written; the Laravel package's 0.6.0 is the first server that publishes and
+enforces them, so all eight client-side hints are finally live. `regex`
+arrives **undelimited** (`^[a-z0-9_]+$`): `RegExp` takes a bare pattern and
+would compile a PHP-delimited one into a pattern matching nothing — the `/` a
+literal, the `^` behind it unreachable — so a `->regex()` field would be
+unsubmittable for values the server accepts, and the fail-open path never
+fires because such a pattern compiles cleanly. A pattern whose flags cannot
+cross the wire arrives as no hint at all rather than a stricter one. A pattern
+Dart genuinely cannot compile still fails open — the server revalidates
+regardless. Two repeater fixes ride along:
+`FieldState.searchOptionsFor` is the public, per-field variant of
+`searchOptions` — a row's select renders off the item *template*, so its
+remote-options lookup must bind to the child's own name, and handing the
+repeater's closure down would query the wrong field — and `_validateRows`
+now marks every validated row child **dirty**, because a synthetic row
+`FormValues` cannot reconstruct the stored-vs-touched distinction the
+top-level form relies on. The trade-off, stated in the README: an untouched
+legacy colour value in a stored repeater row now blocks submission, where
+before a malformed colour the user *just typed* into a row submitted
+unchallenged. Over-eager on purpose, both ways.
+
+**`BooleanBadge`.** A card's badge slot bound to a boolean column renders
+Filament's boolean-column idiom — a check or a cross — instead of the
+literal word `true`. The colour looks up `'true'/'false'` then `'1'/'0'`
+(JSON object keys are strings; `true` as a PHP array key becomes `1`),
+falling back to `success`/`gray`. Detection happens on the raw typed value
+before stringifying, because after `toString()` a real bool and the string
+`"true"` are indistinguishable — and the string must stay a text badge.
+
+**Charts have a ready-made renderer.** The dashboard contract stays
+"published, not drawn" in this package — the two-dependency promise
+(`flutter` + `equatable`) is load-bearing — but the new sibling package
+[`filament_mobile_charts`](https://pub.dev/packages/filament_mobile_charts)
+is the opt-in other half: `flChartBuilder()` over fl_chart, every drawable
+chart type, passed to the `chartBuilder` slot `DashboardScreen` already had.
+
+A relationship repeater is editable against a current server — its save is
+delete-all-then-recreate (keyless state; pinned server-side in
+`RepeaterWriteTest`), which the Repeater section of the README now states
+plainly. Against Laravel 0.6.0 the field also **prefills**: that server
+publishes the rows in the record payload, so the widget seeds from them and
+an edit to another field submits them back untouched. No client change was
+needed for it — a relationship repeater now arrives in exactly the shape a
+JSON-column repeater always did.
+
 ## 0.7.0 — 2026-08-08
 
 **A latin sentence keeps its punctuation under RTL.** Reported from a real

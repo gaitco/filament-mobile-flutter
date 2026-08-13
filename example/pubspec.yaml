@@ -15,12 +15,26 @@ dependencies:
     sdk: flutter
   filament_mobile:
     path: ../
+  # Hosted, not `path: ../../filament_mobile_charts`, because this example
+  # ships inside the published archive: `path: ../` there resolves to the
+  # archive root (this package), but a sibling path points outside it and
+  # dangles, so `pub get` in a downloaded example would fail. For local work
+  # against uncommitted charts source, add a gitignored
+  # `pubspec_overrides.yaml`.
+  filament_mobile_charts: ^0.1.0
   http: ^1.6.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+
+# Load-bearing, not redundant: the charts package depends on a *hosted*
+# filament_mobile, and pub cannot satisfy that alongside this example's path
+# dep on the same package without being told which wins. The local build does.
+dependency_overrides:
+  filament_mobile:
+    path: ../
 
 flutter:
   uses-material-design: true

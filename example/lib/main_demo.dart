@@ -1,4 +1,5 @@
 import 'package:filament_mobile/filament_mobile.dart';
+import 'package:filament_mobile_charts/filament_mobile_charts.dart';
 import 'package:flutter/material.dart';
 
 import 'demo_transport.dart';
@@ -42,10 +43,14 @@ class _DemoHomeState extends State<_DemoHome> {
   @override
   Widget build(BuildContext context) {
     if (_screen == 'index') return _index();
-    // No chartBuilder: the demo ships no charting dependency, so the chart
-    // card renders its honest "no chart renderer supplied" fallback — see
-    // the package README's Dashboard section for wiring a real one.
-    if (_screen == 'dashboard') return DashboardScreen(provider: _dashboard);
+    // Charts are drawn by the companion package's builder — the core package
+    // deliberately ships no charting dependency of its own.
+    if (_screen == 'dashboard') {
+      return DashboardScreen(
+        provider: _dashboard,
+        chartBuilder: flChartBuilder(),
+      );
+    }
     return FutureBuilder<PanelSchema>(
       future: _source.panel(),
       builder: (context, snapshot) {

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../data/resource_data_source.dart';
 import '../data/resource_record.dart';
+import '../data/write_result.dart';
 import '../ports/filament_transport.dart';
 import '../schema/relation_descriptor.dart';
 import 'load_status.dart';
@@ -57,6 +58,61 @@ class RelationListProvider extends ChangeNotifier {
   Future<void> load() => _fetchFirstPage();
 
   Future<void> refresh() => _fetchFirstPage();
+
+  /// The data source this provider fetches through, exposed so the relation
+  /// list screen can build a row's `ResourceFormProvider` against the SAME
+  /// connection — never a second one a host would have to hand-wire.
+  ResourceDataSource get source => _source;
+
+  /// The relation-row writes (P9). Each goes through the relationship on the
+  /// server (a child that is not this parent's is a 404, never a cross-parent
+  /// write), returns the server's verdict as data — a 422 keyed by the CHILD
+  /// resource's field names included, for the caller's form to render — and
+  /// on success reloads through the list's own [refresh]: the write changed
+  /// this page's membership, and re-fetching page one is the refresh the
+  /// class already owns rather than a client-side row edit the server never
+  /// confirmed.
+  Future<WriteResult> create(Map<String, dynamic> values) async {
+    final result = await _source.createRelation(
+      resourceKey,
+      id,
+      relation,
+      values,
+    );
+    if (result is WriteSuccess) await refresh();
+    return result;
+  }
+
+  /// [childId] is the child's own key value — the relation's `recordKey`,
+  /// routinely not `id`; see `ResourceDataSource.updateRelation`.
+  Future<WriteResult> update(
+    Object childId,
+    Map<String, dynamic> values,
+  ) async {
+    final result = await _source.updateRelation(
+      resourceKey,
+      id,
+      relation,
+      childId,
+      values,
+    );
+    if (result is WriteSuccess) await refresh();
+    return result;
+  }
+
+  /// A [WriteGone] refreshes too: the row is gone either way — the same
+  /// outcome as deleting it ourselves, and `ResourceViewScreen`'s record
+  /// delete already treats the two as one.
+  Future<WriteResult> delete(Object childId) async {
+    final result = await _source.deleteRelation(
+      resourceKey,
+      id,
+      relation,
+      childId,
+    );
+    if (result is WriteSuccess || result is WriteGone) await refresh();
+    return result;
+  }
 
   Future<void> _fetchFirstPage() async {
     final requestId = ++_requestId;

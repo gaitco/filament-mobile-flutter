@@ -1,10 +1,14 @@
+import 'package:filament_mobile/data/relation_submit_target.dart';
 import 'package:filament_mobile/data/resource_record.dart';
 import 'package:filament_mobile/data/upload_result.dart';
 import 'package:filament_mobile/data/write_result.dart';
 import 'package:filament_mobile/ports/filament_strings.dart';
 import 'package:filament_mobile/ports/filament_transport.dart';
+import 'package:filament_mobile/schema/card_layout.dart';
+import 'package:filament_mobile/schema/relation_descriptor.dart';
 import 'package:filament_mobile/schema/schema_component.dart';
 import 'package:filament_mobile/state/load_status.dart';
+import 'package:filament_mobile/state/resource_form_provider.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/form_fixtures.dart';
@@ -731,4 +735,122 @@ void main() {
       },
     );
   });
+
+  group('relation write-target override (P9)', () {
+    const relation = RelationDescriptor(
+      key: 'tags',
+      label: 'Tags',
+      card: CardLayout(titleField: 'name'),
+      recordKey: 'name',
+    );
+
+    ResourceFormProvider relationFormFor(
+      _RelationRecordingSource source, {
+      Object? recordId,
+    }) => ResourceFormProvider(
+      source: source,
+      resource: schemaFor(source.components),
+      strings: const FilamentStrings(),
+      recordId: recordId,
+      submitTarget: const RelationSubmitTarget(
+        resourceKey: 'banners',
+        recordId: 7,
+        relation: relation,
+      ),
+    );
+
+    test('a create submits to the relation endpoint with the parent\'s '
+        'coordinates, never the child resource\'s own create', () async {
+      final source = _RelationRecordingSource(components: formWith());
+      final provider = relationFormFor(source);
+      await provider.load();
+
+      provider.change('name', 'sale');
+      final saved = await provider.submit();
+
+      expect(saved, isTrue);
+      expect(source.relationCalls, ['create']);
+      expect(source.lastParent, (resourceKey: 'banners', recordId: 7));
+      expect(source.lastRelationPayload?['name'], 'sale');
+      expect(
+        source.writeCalls,
+        0,
+        reason: 'the resource write path must stay untouched',
+      );
+    });
+
+    test('an update submits to the relation row URL, the form\'s recordId '
+        'becoming the child segment', () async {
+      final source = _RelationRecordingSource(components: formWith());
+      final provider = relationFormFor(source, recordId: 'sale');
+      await provider.load();
+
+      provider.change('name', 'clearance');
+      final saved = await provider.submit();
+
+      expect(saved, isTrue);
+      expect(source.relationCalls, ['update']);
+      expect(source.lastChildId, 'sale');
+      expect(source.lastRelationPayload?['name'], 'clearance');
+      expect(source.writeCalls, 0);
+    });
+
+    test('a 422 from the relation endpoint maps onto the same fields and '
+        'banner machinery a resource write uses', () async {
+      final source = _RelationRecordingSource(
+        components: formWith(),
+        writeResult: const WriteInvalid({
+          'name': ['The name field is required.'],
+        }),
+      );
+      final provider = relationFormFor(source);
+      await provider.load();
+
+      final saved = await provider.submit();
+
+      expect(saved, isFalse);
+      expect(provider.fieldErrors['name'], 'The name field is required.');
+      expect(provider.formError, isNull);
+    });
+  });
+}
+
+/// Records the relation writes (P9) so a test can assert WHICH endpoint the
+/// submission went to and with whose coordinates — the whole point of the
+/// override. Everything else defers to [FakeSource].
+class _RelationRecordingSource extends FakeSource {
+  _RelationRecordingSource({required super.components, super.writeResult});
+
+  final List<String> relationCalls = [];
+  ({String resourceKey, Object recordId})? lastParent;
+  Object? lastChildId;
+  Map<String, dynamic>? lastRelationPayload;
+
+  @override
+  Future<WriteResult> createRelation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation,
+    Map<String, dynamic> values,
+  ) {
+    relationCalls.add('create');
+    lastParent = (resourceKey: resourceKey, recordId: id);
+    lastRelationPayload = values;
+    return Future.value(writeResult);
+  }
+
+  @override
+  Future<WriteResult> updateRelation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation,
+    Object childId,
+    Map<String, dynamic> values,
+  ) {
+    relationCalls.add('update');
+    lastParent = (resourceKey: resourceKey, recordId: id);
+    lastChildId = childId;
+    lastRelationPayload = values;
+    return Future.value(writeResult);
+  }
 }

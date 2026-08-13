@@ -37,6 +37,19 @@ Map<String, String> validate(
 /// `'<repeater>.<row>.<child>'`, the same shape Laravel's own `422` uses for
 /// `items.0.name`, so a required child empty in row 2 lands on row 2 — never
 /// folded into one generic message for the whole repeater.
+///
+/// The seeded [FormValues] marks every validated child **dirty**. A row's
+/// FormValues is synthetic — rebuilt on every validation pass, and a row's
+/// widgets never report per-field dirty state at all — so `dirty` here can
+/// only be all or nothing. Nothing was what shipped first, and it meant a
+/// dirty-gated check (the colour-format check in [_validateField]) silently
+/// NEVER fired inside a row: a malformed colour the user just typed into a
+/// row submitted unchallenged while the same value at the top level was
+/// blocked. The top-level gate exists to spare a legacy stored value the
+/// user never touched (fix round 1, Finding 3); a row cannot reconstruct
+/// that stored-vs-touched distinction at this layer, so it errs the other
+/// way — the same over-eager-on-purpose rule [FormValues.set] itself
+/// follows.
 Map<String, String> _validateRows(
   RepeaterComponent field,
   FormValues values,
@@ -46,15 +59,19 @@ Map<String, String> _validateRows(
   if (rows is! List) return const {};
 
   final errors = <String, String>{};
+  final children = writableFields(field.children).toList();
   for (var index = 0; index < rows.length; index++) {
     final row = rows[index];
     if (row is! Map) continue;
 
-    final rowValues = FormValues.initial(
+    var rowValues = FormValues.initial(
       field.children,
       from: Map<String, dynamic>.from(row),
     );
-    for (final child in writableFields(field.children)) {
+    for (final child in children) {
+      rowValues = rowValues.set(child.name!, rowValues[child.name!]);
+    }
+    for (final child in children) {
       final message = _validateField(child, rowValues, strings);
       if (message != null) {
         errors['${field.name}.$index.${child.name}'] = message;
@@ -110,13 +127,10 @@ String? _validateField(
     return strings.fieldColor;
   }
 
-  // Forward-looking: `SchemaWalker::rules()` (`SchemaWalker.php:340-361`)
-  // never emits `email`, `url`, `regex` or `confirmed` today — none of them
-  // appear in `contract/laravel-panel.json` — so these branches are dead
-  // against the current server. `ValidationRules` has parsed them since an
-  // earlier phase regardless, and they cost nothing while they never fire.
-  // The server would need to start emitting the corresponding rule key
-  // before any of the four could actually trip.
+  // All four branches are live: `SchemaWalker::rules()` publishes `email`,
+  // `url`, `regex` and `confirmed`, and RuleExtractor enforces them — the
+  // published hint and the server's eventual 422 come from the same
+  // declaration, so a client-side trip here predicts a server rejection.
   if (rules.email && value is String && !_emailPattern.hasMatch(value)) {
     return _message(rules, 'email', strings.fieldEmail);
   }

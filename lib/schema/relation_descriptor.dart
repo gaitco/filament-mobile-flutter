@@ -13,6 +13,7 @@ class RelationDescriptor extends Equatable {
     required this.label,
     required this.card,
     this.recordKey = 'id',
+    this.resource,
     this.direction = PanelDirection.ltr,
   });
 
@@ -57,6 +58,12 @@ class RelationDescriptor extends Equatable {
       // Absent on an older server that predates this field — 'id' is the
       // same default `ResourceSchema.recordKey` takes, and the common case.
       recordKey: opt<String>(json, 'recordKey') ?? 'id',
+      // Absent or null on a server predating P9, or one whose relation's
+      // child model resolves to zero or several mobile resources: either way
+      // the relation is read-only on this API. `opt` reads a wrong-typed
+      // value as absent too — a client never invents a capability the server
+      // did not declare.
+      resource: opt<String>(json, 'resource'),
       direction: direction,
     );
   }
@@ -109,6 +116,14 @@ class RelationDescriptor extends Equatable {
   /// model on the far end of this relation, which is routinely a different
   /// class with a different key.
   final String recordKey;
+
+  /// The CHILD resource's key, published only when the relation's child model
+  /// resolves to exactly one mobile resource (P9) — the resource whose form
+  /// and `permissions` block govern this relation's row writes. `null` (a
+  /// server predating P9, or a zero/several resource match) means read-only:
+  /// no write affordance may be drawn without it, and the write endpoints
+  /// 404 there anyway.
+  final String? resource;
 
   /// The owning resource's layout direction, propagated at parse time by
   /// [ResourceSchema.fromJson] — see [RelationDescriptor.fromJson]. Defaults

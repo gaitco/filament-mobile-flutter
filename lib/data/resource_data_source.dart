@@ -49,6 +49,37 @@ abstract interface class ResourceDataSource {
     int page,
   });
 
+  /// POST /{resource}/{id}/relations/{relation} — creates one child row
+  /// through the relationship (P9). Same never-throw contract as [create];
+  /// a 422 carries `errors` keyed by the CHILD resource's field names.
+  Future<WriteResult> createRelation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation,
+    Map<String, dynamic> values,
+  );
+
+  /// PUT /{resource}/{id}/relations/{relation}/{childId} — updates one child
+  /// row, resolved through the relationship (P9): [childId] is the related
+  /// model's own key (the relation's published `recordKey`), and a child that
+  /// is not this parent's answers 404, never a cross-parent write.
+  Future<WriteResult> updateRelation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation,
+    Object childId,
+    Map<String, dynamic> values,
+  );
+
+  /// DELETE /{resource}/{id}/relations/{relation}/{childId} — removes one
+  /// child row, resolved through the relationship exactly as [updateRelation].
+  Future<WriteResult> deleteRelation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation,
+    Object childId,
+  );
+
   /// POST /{resource} — never throws on a 4xx; see [WriteResult].
   Future<WriteResult> create(String resourceKey, Map<String, dynamic> values);
 

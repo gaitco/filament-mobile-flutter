@@ -309,6 +309,83 @@ class DemoTransport implements FilamentTransport, FilamentUploadTransport {
             'label': 'Revenue',
             'data': [1200, 1900, 1500, 2100, 2400, 2200],
           },
+          {
+            'label': 'Costs',
+            'data': [800, 1100, 950, 1300, 1500, 1400],
+          },
+        ],
+      },
+      {
+        'type': 'chart',
+        'chartType': 'bar',
+        'heading': 'Orders per channel',
+        'description': null,
+        'labels': ['Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug'],
+        'datasets': [
+          {
+            'label': 'Online',
+            'data': [42, 55, 48, 61, 70, 66],
+          },
+          {
+            'label': 'In store',
+            'data': [30, 28, 35, 31, 38, 40],
+          },
+        ],
+      },
+      {
+        'type': 'chart',
+        'chartType': 'pie',
+        'heading': 'Sales by category',
+        'description': null,
+        'labels': ['Apparel', 'Footwear', 'Accessories', 'Home'],
+        'datasets': [
+          {
+            'label': 'Sales',
+            'data': [44, 26, 18, 12],
+          },
+        ],
+      },
+      {
+        'type': 'chart',
+        'chartType': 'doughnut',
+        'heading': 'Traffic sources',
+        'description': null,
+        'labels': ['Search', 'Direct', 'Social', 'Referral'],
+        'datasets': [
+          {
+            'label': 'Visits',
+            'data': [52, 23, 15, 10],
+          },
+        ],
+      },
+      {
+        'type': 'chart',
+        'chartType': 'radar',
+        'heading': 'Support health',
+        'description': null,
+        'labels': ['Speed', 'Quality', 'Reach', 'Uptime', 'CSAT'],
+        'datasets': [
+          {
+            'label': 'This quarter',
+            'data': [70, 82, 65, 90, 77],
+          },
+          {
+            'label': 'Last quarter',
+            'data': [60, 75, 58, 84, 70],
+          },
+        ],
+      },
+      {
+        'type': 'chart',
+        'chartType': 'scatter',
+        'heading': 'Order value vs. day',
+        'description': null,
+        'labels': ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+        'datasets': [
+          {
+            'label': 'Avg. order',
+            'data': [85, 120, 95, 140, 160, 210, 175],
+          },
         ],
       },
     ],

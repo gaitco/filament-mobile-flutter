@@ -1,7 +1,20 @@
+import 'dart:async';
+
+import 'package:filament_mobile/dashboard/dashboard_data.dart';
+import 'package:filament_mobile/data/action_result.dart';
+import 'package:filament_mobile/data/options_page.dart';
 import 'package:filament_mobile/data/paginated_records.dart';
+import 'package:filament_mobile/data/resource_data_source.dart';
 import 'package:filament_mobile/data/resource_record.dart';
+import 'package:filament_mobile/data/upload_result.dart';
+import 'package:filament_mobile/data/write_result.dart';
 import 'package:filament_mobile/schema/card_layout.dart';
+import 'package:filament_mobile/schema/panel_schema.dart';
 import 'package:filament_mobile/schema/relation_descriptor.dart';
+import 'package:filament_mobile/schema/resource_labels.dart';
+import 'package:filament_mobile/schema/resource_schema.dart';
+import 'package:filament_mobile/schema/schema_component.dart';
+import 'package:filament_mobile/state/resource_view_provider.dart';
 import 'package:filament_mobile/ui/relation_section_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -40,6 +53,7 @@ PaginatedRecords _page(
 Widget _harness(
   Future<PaginatedRecords> Function({int page}) fetch, {
   void Function(RelationDescriptor relation, Object recordId)? onSeeAllTap,
+  ResourceViewProvider? parent,
 }) {
   return MaterialApp(
     home: Scaffold(
@@ -47,10 +61,137 @@ Widget _harness(
         relation: _relation,
         recordId: '1',
         fetch: fetch,
+        parent: parent,
         onSeeAllTap: onSeeAllTap,
       ),
     ),
   );
+}
+
+const _resource = ResourceSchema(
+  key: 'banners',
+  labels: ResourceLabels(singular: 'Banner', plural: 'Banners'),
+);
+
+/// Serves the parent record for `ResourceViewProvider.load()` — the section's
+/// own rows come from the test's `fetch` closure, never this source. The
+/// hold/complete pair parks a load mid-flight so a test can observe the
+/// `loading` notification on its own, before the `success` one lands.
+class _RecordSource implements ResourceDataSource {
+  Completer<ResourceRecord>? _held;
+
+  void holdNextRecord() => _held = Completer<ResourceRecord>();
+
+  void completeHeldRecord() =>
+      _held!.complete(const ResourceRecord(id: 7, attributes: {'name': 'B'}));
+
+  @override
+  Future<ResourceRecord> record(String resourceKey, Object id) {
+    // Deliberately NOT consumed: `completeHeldRecord` completes this same
+    // completer after the test has observed the loading notification, so it
+    // must still be reachable here.
+    final held = _held;
+    if (held != null) return held.future;
+    return Future.value(const ResourceRecord(id: 7, attributes: {'name': 'B'}));
+  }
+
+  @override
+  Future<PanelSchema> panel() async => throw UnimplementedError();
+
+  @override
+  Future<PanelSchema?> cachedPanel() async => null;
+
+  @override
+  Future<PaginatedRecords> list(
+    String resourceKey, {
+    int page = 1,
+    String? search,
+    String? sort,
+    String? direction,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<PaginatedRecords> relation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation, {
+    int page = 1,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<WriteResult> createRelation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation,
+    Map<String, dynamic> values,
+  ) => throw UnimplementedError();
+
+  @override
+  Future<WriteResult> updateRelation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation,
+    Object childId,
+    Map<String, dynamic> values,
+  ) => throw UnimplementedError();
+
+  @override
+  Future<WriteResult> deleteRelation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation,
+    Object childId,
+  ) => throw UnimplementedError();
+
+  @override
+  Future<WriteResult> create(String resourceKey, Map<String, dynamic> values) =>
+      throw UnimplementedError();
+
+  @override
+  Future<WriteResult> update(
+    String resourceKey,
+    Object id,
+    Map<String, dynamic> values,
+  ) => throw UnimplementedError();
+
+  @override
+  Future<WriteResult> destroy(String resourceKey, Object id) =>
+      throw UnimplementedError();
+
+  @override
+  Future<ActionResult> runAction(
+    String resourceKey,
+    Object id,
+    String action,
+  ) => throw UnimplementedError();
+
+  @override
+  Future<OptionsPage> options(
+    String resourceKey, {
+    required String field,
+    Object? recordId,
+    required Map<String, dynamic> values,
+    required String query,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<List<SchemaComponent>> state(
+    String resourceKey, {
+    Object? recordId,
+    required Map<String, dynamic> values,
+    required String changed,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<DashboardData> dashboard() => throw UnimplementedError();
+
+  @override
+  Future<UploadResult> uploadFile(
+    String resourceKey,
+    String field, {
+    required List<int> bytes,
+    required String filename,
+  }) => throw UnimplementedError();
 }
 
 void main() {
@@ -239,6 +380,117 @@ void main() {
 
       expect(tappedRelation, _relation);
       expect(tappedRecordId, '1');
+    });
+
+    group('parent reload (P9)', () {
+      testWidgets('reloads its rows when the parent record finishes '
+          'reloading — an action that changed membership no longer shows '
+          'stale rows', (tester) async {
+        final parent = ResourceViewProvider(
+          source: _RecordSource(),
+          resource: _resource,
+          id: 7,
+        );
+        await parent.load();
+
+        var fetches = 0;
+        await tester.pumpWidget(
+          _harness(parent: parent, ({int page = 1}) async {
+            fetches++;
+            return _page([
+              {'id': 1, 'name': fetches == 1 ? 'Old row' : 'Fresh row'},
+            ]);
+          }),
+        );
+        await pumpUntilFound(tester, find.text('Old row'));
+        expect(fetches, 1);
+
+        await parent.load();
+        await pumpUntilFound(tester, find.text('Fresh row'));
+
+        expect(fetches, 2);
+        expect(find.text('Old row'), findsNothing);
+      });
+
+      testWidgets('the parent going LOADING does not refetch — only the '
+          'completed reload does', (tester) async {
+        // The provider notifies twice per load; fetching on the first would
+        // race the record the rows belong to (and double every fetch).
+        final source = _RecordSource();
+        final parent = ResourceViewProvider(
+          source: source,
+          resource: _resource,
+          id: 7,
+        );
+        await parent.load();
+
+        var fetches = 0;
+        await tester.pumpWidget(
+          _harness(parent: parent, ({int page = 1}) async {
+            fetches++;
+            return _page([
+              {'id': 1, 'name': 'Row'},
+            ]);
+          }),
+        );
+        await pumpUntilFound(tester, find.text('Row'));
+        expect(fetches, 1);
+
+        source.holdNextRecord();
+        final reload = parent.load();
+        await tester.pump(); // the `loading` notification lands here
+
+        expect(fetches, 1, reason: 'mid-load is not a reload');
+
+        source.completeHeldRecord();
+        await reload;
+        await tester.pump();
+
+        expect(fetches, 2);
+      });
+
+      testWidgets('a swapped parent (didUpdateWidget) is re-subscribed: the '
+          'old provider no longer drives the section, the new one does', (
+        tester,
+      ) async {
+        final old = ResourceViewProvider(
+          source: _RecordSource(),
+          resource: _resource,
+          id: 7,
+        );
+        final swapped = ResourceViewProvider(
+          source: _RecordSource(),
+          resource: _resource,
+          id: 8,
+        );
+        await old.load();
+        await swapped.load();
+
+        var fetches = 0;
+        Future<PaginatedRecords> fetch({int page = 1}) async {
+          fetches++;
+          return _page([
+            {'id': 1, 'name': 'Row'},
+          ]);
+        }
+
+        await tester.pumpWidget(_harness(fetch, parent: old));
+        await pumpUntilFound(tester, find.text('Row'));
+        expect(fetches, 1);
+
+        await tester.pumpWidget(_harness(fetch, parent: swapped));
+        await tester.pump();
+        // A swap alone is not a reload — same relation, same record.
+        expect(fetches, 1);
+
+        await old.load();
+        await tester.pump();
+        expect(fetches, 1, reason: 'the swapped-out provider is unheard');
+
+        await swapped.load();
+        await tester.pump();
+        expect(fetches, 2);
+      });
     });
   });
 }

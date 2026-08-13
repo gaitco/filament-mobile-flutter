@@ -159,6 +159,11 @@ class _ResourceViewScreenState extends State<ResourceViewScreen> {
   /// `RelationDescriptor`. Always rendered when the resource carries one: a
   /// published relation needs nothing wired to appear, the same read path
   /// `_infolist` above already uses for the record itself.
+  ///
+  /// Each section also gets the provider itself as its `parent`: an action
+  /// that changes relation membership reloads the record, and the section
+  /// hears that reload and re-fetches its rows instead of showing stale
+  /// membership (P9).
   List<Widget> _relationSections(ResourceRecord record) {
     return [
       for (final relation in widget.provider.resource.relations)
@@ -168,6 +173,7 @@ class _ResourceViewScreenState extends State<ResourceViewScreen> {
           recordId: record.id,
           fetch: ({int page = 1}) =>
               widget.provider.loadRelation(relation, page: page),
+          parent: widget.provider,
           strings: widget.strings,
           onSeeAllTap: widget.onSeeAllTap,
         ),

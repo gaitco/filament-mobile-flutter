@@ -174,6 +174,68 @@ class RestResourceDataSource implements ResourceDataSource {
     );
   }
 
+  /// The three relation-row writes (P9) sit beside [relation], the read:
+  /// same sibling URL family, same never-throw contract as
+  /// [create]/[update]/[destroy] — a 4xx comes back as data and only a
+  /// transport failure throws, which the `catch` folds into [WriteFailed]
+  /// exactly the way those three do.
+  @override
+  Future<WriteResult> createRelation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation,
+    Map<String, dynamic> values,
+  ) async {
+    try {
+      return _interpret(
+        await _transport.post(
+          '$prefix/$resourceKey/$id/relations/${relation.key}',
+          values,
+        ),
+      );
+    } catch (e) {
+      return WriteFailed(messageOf(e));
+    }
+  }
+
+  @override
+  Future<WriteResult> updateRelation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation,
+    Object childId,
+    Map<String, dynamic> values,
+  ) async {
+    try {
+      return _interpret(
+        await _transport.put(
+          '$prefix/$resourceKey/$id/relations/${relation.key}/$childId',
+          values,
+        ),
+      );
+    } catch (e) {
+      return WriteFailed(messageOf(e));
+    }
+  }
+
+  @override
+  Future<WriteResult> deleteRelation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation,
+    Object childId,
+  ) async {
+    try {
+      return _interpret(
+        await _transport.delete(
+          '$prefix/$resourceKey/$id/relations/${relation.key}/$childId',
+        ),
+      );
+    } catch (e) {
+      return WriteFailed(messageOf(e));
+    }
+  }
+
   @override
   Future<ActionResult> runAction(
     String resourceKey,

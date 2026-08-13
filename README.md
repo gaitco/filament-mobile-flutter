@@ -85,10 +85,10 @@ and link handling — is in [`example/`](example).
 | [Key/value](#keyvalue) | Add/remove pairs, key and value cells gated independently |
 | [Colour](#colour) | A text field with a live swatch, in the panel's own format |
 | [Time and date bounds](#time-and-date-bounds) | `showTimePicker`, and the bounds a picker declares |
-| [Relations](#relations) | A child list on the record screen, "See all" opens the full paginated view |
+| [Relations](#relations) | A child list on the record screen — writable when the server names a child resource; "See all" opens the full paginated view |
 | [Rich text](#rich-text) | A real document — headings, lists, quotes, emphasis, links |
 | [Schema caching](#schema-caching) | Cold start renders from cache, revalidates behind it |
-| [Dashboard](#dashboard) | Stat tiles render; charts are yours to draw |
+| [Dashboard](#dashboard) | Stat tiles render; charts drawn by the opt-in [`filament_mobile_charts`](https://pub.dev/packages/filament_mobile_charts) sibling, or your own builder |
 | [RTL and i18n](#rtl-and-i18n) | The panel's direction, not the device's |
 
 Everything below is reference. Each feature section ends with a **Known
@@ -104,6 +104,16 @@ Every wire type the server can publish for a **form** has a built-in widget:
 
 Infolist entries render through `EntryRegistry`: `text_entry`,
 `badge_entry`, `boolean_entry`, `image_entry` and `rich_entry`.
+
+A card's **badge slot bound to a boolean column** renders a `BooleanBadge`
+(`lib/ui/semantic_badge.dart`) — Filament's boolean-column idiom, a check or
+a cross, instead of the literal word `true`. The colour goes through the
+same semantic map a text badge uses: both key spellings are honoured
+(`'true'/'false'`, then `'1'/'0'` — JSON object keys are strings, and `true`
+as a PHP array key becomes `1`), falling back to `success`/`gray` when the
+panel mapped neither. Detection happens on the record's **raw typed value**
+before stringifying — after `toString()` a real bool and the string `"true"`
+are indistinguishable, and the string must stay a text badge.
 
 A type this build does not know renders as an `UnknownComponent` — a visible
 placeholder in debug, skipped entirely in release, so a newer server never
@@ -428,9 +438,10 @@ Both controls, and every field inside a row, honour `state.enabled` and
 `readOnly` — the server's word wins, same as an upload field: a repeater the
 panel published `config.readOnly: true` for shows the new `repeaterReadOnly`
 string and stays inert even if the host's own gates would otherwise allow
-editing. The server publishes that flag for three shapes (see below): a
-relationship repeater, a nested one, and one whose item template holds a
-child the server cannot round-trip.
+editing. The server publishes that flag for two shapes (see below): a
+nested repeater, and one whose item template holds a child the server
+cannot round-trip. A relationship repeater is editable against a current
+server — see the third known weakness below for what its save costs.
 
 Each row's fields are built through **the host's own `FieldRegistry`** — the
 same one that built the repeater — so a `FieldRegistry.register()` custom
@@ -469,10 +480,22 @@ under otherwise-translated labels until it supplies its own.
 - **The item template is static.** A `live()` field inside a row does not
   re-settle that row — `/state` settles a flat form, and a row coordinate is
   a problem this slice does not solve.
-- **A relationship repeater is read-only.** `Repeater::relationship()`
-  writes child rows through Filament's own `saveRelationships()`, which this
-  package's write path never calls; the field publishes `config.readOnly:
-  true` and this widget honours it, same as any other server-side gate.
+- **A relationship repeater's save is delete-all-then-recreate.** Against a
+  current server the field is editable and writes through Filament's own
+  `saveRelationships()` — but its state on the wire is keyless, so every
+  save deletes the existing child rows and re-creates them from the
+  submitted state (pinned server-side in `RepeaterWriteTest`). Nothing this
+  widget can soften; worth knowing before editing rows other tables point
+  at by id.
+- **An untouched legacy value in a stored row can now block submission.**
+  Per-row validation seeds a synthetic `FormValues` per row, and a row
+  cannot reconstruct the stored-vs-touched distinction the top-level form
+  uses to spare a legacy value the user never edited — so every validated
+  child in a row is treated as dirty. That is over-eager on purpose (a
+  malformed colour the user *just typed* into a row previously submitted
+  unchallenged), but the trade-off cuts the other way too: a stored row
+  carrying a legacy colour value fails the format check even if the user
+  never opened that row.
 - **A nested repeater renders read-only.** A repeater inside another
   repeater's item template is published `config.readOnly: true` by the
   server, and this widget honours that flag like any other — the nesting
@@ -490,10 +513,15 @@ under otherwise-translated labels until it supplies its own.
   every row, so the server refuses the field outright rather than offering a
   control that eats data. Its stored rows are still returned on `GET` and
   still render, inert. `doctor` names the offending child.
-- **A `select` with `optionsUrl` inside a row renders an empty dropdown.**
-  `FieldState.searchOptions` is not threaded into a row's children, so an
-  async-options select in a repeater has nothing to fetch with. Degraded but
-  honest; off-pattern only in that it does not say why.
+- **A `select` with `optionsUrl` inside a row fetches through
+  `FieldState.searchOptionsFor`.** The per-field variant of
+  `FieldState.searchOptions`, public for exactly this caller: a row's select
+  is rendered off the item *template*, so its lookup must be bound to the
+  child's own name — handing the repeater's `searchOptions` closure down
+  would query the repeater's field, not the child's. Leaf fields keep
+  reading `searchOptions`, and the server side descends through the repeater
+  to find the child (see the Laravel README's Repeater section). Against a
+  server predating that descent the control degrades to an empty dropdown.
 
 **Why `readOnly` defaults to `true` when the key is absent:** an absent
 `config.readOnly` means a server predating repeater support, and this client
@@ -665,17 +693,22 @@ rather than normalising it: a bare `"09:00"` and a full
 `ResourceSchema.relations` (`List<RelationDescriptor>`, **always present** —
 `[]` when the server publishes none, and read the same way on an *absent*
 `relations` key: a server predating this feature) is what a resource's
-Filament relation managers become on mobile. This is a **read-only** list:
-no create, edit, delete, attach or detach, and no filters, search or
+Filament relation managers become on mobile. No filters, search or
 sorting — see the Laravel README's Relations section for the full server
 picture, including why a relation manager that narrows its own query is not
-published at all.
+published at all. Against a current server a relation can also be
+**writable**, which is what its descriptor's `resource` key announces.
 
 Each `RelationDescriptor` carries `key`, `label`, `card` (the same
-`CardLayout` a resource's own list card uses), and `recordKey` — the
+`CardLayout` a resource's own list card uses), `recordKey` — the
 **related** model's own route key, not the parent resource's, and not
-always `id`. `RestResourceDataSource.relation()` parses each row by
-`relation.recordKey`, never the parent's.
+always `id` — and `resource`, the child **resource's** key.
+`RestResourceDataSource.relation()` parses each row by
+`relation.recordKey`, never the parent's. **`resource` is the write
+capability flag**: the server publishes it only when exactly one registered
+resource owns the related model, and the parser reads an absent, null or
+wrong-typed value as *absent* — read-only, never a throw, the same
+absence-means-unavailable rule `readOnly` already follows.
 
 ### The section, and where it fetches from
 
@@ -773,26 +806,79 @@ Three new `FilamentStrings`, all English-default, same rule as every other
 string in this package: `seeAll` (`'See all'`), `relationEmpty`
 (`'Nothing here yet'`), `relationFailed` (`'Could not load'`).
 
+### Writes — the child resource's form, the relation's endpoint
+
+A relation whose descriptor carries a `resource` key is writable end to end.
+Three members join `ResourceDataSource`, beside `relation()`:
+
+```dart
+Future<WriteResult> createRelation(String resourceKey, Object id, RelationDescriptor relation, Map<String, dynamic> values);
+Future<WriteResult> updateRelation(String resourceKey, Object id, RelationDescriptor relation, Object childId, Map<String, dynamic> values);
+Future<WriteResult> deleteRelation(String resourceKey, Object id, RelationDescriptor relation, Object childId);
+```
+
+**This is a breaking change for a host with its own `ResourceDataSource`
+implementation** — the interface gained three methods, so it will not
+compile until it adds them. A host on `RestResourceDataSource` needs no
+change at all; the REST implementations ship there, keyed off
+`relation.recordKey` exactly as the read is. The same "member, not port"
+reasoning as `relation()` itself applies: `lib/ports/*` stays untouched.
+
+The form a row is edited in is the **child resource's own**
+`ResourceFormScreen` — only the write target changes. That override is one
+small value, `RelationSubmitTarget` (parent resource key, parent record id,
+the relation), handed to `ResourceFormProvider.submitTarget`: null — every
+form outside a relation — submits to the resource's own endpoints exactly as
+before; non-null redirects *only* the write, so validation, the `422`
+mapping and the error banner are shared verbatim (the server keys a relation
+write's `422` by the same child-form field names this screen renders).
+Create vs update is decided by the provider's own `recordId`, exactly as
+the resource write path already decides it.
+
+`RelationListScreen` takes an optional `childResource` (the resolved
+`ResourceSchema` for `descriptor.resource` — resolving it is the host's one
+job; `ResourceDataSource` already fetches schemas). Every affordance is
+**permission-gated off the child resource's published `permissions`**: an
+Add button on `create`, per-row edit and delete on `update`/`delete`, and a
+null `childResource` or a false flag renders **no control at all** — the
+standing absence-not-disabled rule. Delete confirms through the same dialog
+`ResourceViewScreen`'s own delete uses, one level down, reusing the existing
+`deleteConfirmTitle`/`deleteConfirmBody`/`deleteConfirm`/`cancel` strings.
+The per-row controls arrive through two new, generally-useful slots —
+`ResourceCard.trailing` and `PaginatedCardList.rowTrailing` — rather than a
+relation-specific card fork.
+
+**The section refreshes when the record does.** `RelationSectionWidget`
+takes an optional `parent` (the `ResourceViewProvider` it sits under) and
+reloads when the parent finishes a reload — a record action that changed
+relation membership no longer leaves stale rows until the user leaves and
+returns. It listens only for a **success** notification: a failed parent
+reload leaves the section showing what it already had, which is strictly
+better than blanking good rows behind the parent's error.
+
 ### Known weaknesses, stated now
 
 - **A relation manager that narrows its own query is invisible on
   mobile.** The server refuses to publish it at all — see the Laravel
   README's Relations section for why — so there is nothing here for this
   client to render around it.
-- **The section loads once, in `initState`, and does not refresh after a
-  record action.** `RelationSectionWidget._load()` has exactly one caller;
-  there is no `didUpdateWidget` and no listener on the parent record's own
-  reload. A relation section shows stale rows after an action that changes
-  the relation's membership until the user leaves the screen and returns.
-  Tracked in `docs/superpowers/HANDOFF.md`.
+- **The section refreshes only through `parent`.** Wire
+  `RelationSectionWidget.parent` (the record screen's own provider) and a
+  completed parent reload refreshes the section; without it the section
+  loads once, in `initState`, and shows stale rows after an action that
+  changes the relation's membership until the user leaves the screen and
+  returns.
 - **The relation manager's filters, search and sorting are ignored.** The
   list arrives in relation order, unfiltered — matching the server exactly,
   which itself does not evaluate them.
 - **Only the first two columns become a card**, because the server only
   derives that many. A relation whose meaning lives in its third column
   looks empty of information on the phone too.
-- **Nothing is writable.** No create, edit, delete, attach or detach — the
-  section and the full list are both read paths only.
+- **Writes need the server to name a child resource.** A relation whose
+  descriptor has no `resource` key — zero or several registered resources
+  own the child model, or the server predates relation writes — is a read
+  path here exactly as before. Attach and detach are not exposed on either
+  side.
 
 ## Rich text
 
@@ -1058,7 +1144,7 @@ be masked by a stale panel sitting in `success`.
 
 ## Dashboard
 
-*Stats render; charts are the host's.*
+*Stats render; charts come from the opt-in sibling package, or your own builder.*
 
 `DashboardProvider` + `DashboardScreen` follow the same provider/screen
 shape as every other read screen: `LoadStatus`, skeleton-first loading,
@@ -1094,7 +1180,20 @@ typedef DashboardChartBuilder =
 ```
 
 A host that wants charts renders them with whatever charting package it
-already has, in about ten lines — `fl_chart` here:
+already has. The companion package
+[`filament_mobile_charts`](https://pub.dev/packages/filament_mobile_charts)
+is the ready-made answer — one dependency, one line, every chart type the
+server can publish drawn with `fl_chart`:
+
+```dart
+DashboardScreen(
+  provider: dashboardProvider,
+  chartBuilder: flChartBuilder(),
+)
+```
+
+Or hand-roll the builder against your own charting package, in about ten
+lines:
 
 ```dart
 DashboardScreen(
@@ -1292,9 +1391,19 @@ itself inside `build(BuildContext)`.
 *`FilamentStrings` defaults to English, silently.*
 
 The write path added twelve strings — `save`, `saveFailed`, the four delete
-and cancel strings, and the six client-side validation hints. Every one has an
+and cancel strings, and the client-side validation hints (eight today:
+`fieldRequired`, `fieldEmail`, `fieldUrl`, `fieldPattern`, `fieldConfirmed`,
+`fieldColor`, `fieldMin`, `fieldMax`). Every one has an
 English default, so a host that upgrades and changes nothing still compiles
 and still runs — and shows English hints under server-translated labels.
+
+All eight hints are live against a current server. This client parsed
+`url`, `regex` and `confirmed` from the start; the Laravel package's 0.6.0
+is the first server that actually publishes and enforces them, closing a
+one-sided corner where the parser sat wired and dead. `regex` arrives as
+the pattern verbatim and a pattern Dart cannot compile fails open — the
+server revalidates regardless, so a hint that cannot even parse is worth
+nothing here.
 
 This is sharper than it sounds, because a client hint **blocks the
 submission**: when a required field is empty the request never leaves the

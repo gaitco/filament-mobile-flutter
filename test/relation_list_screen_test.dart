@@ -11,10 +11,13 @@ import 'package:filament_mobile/ports/filament_transport.dart';
 import 'package:filament_mobile/schema/card_layout.dart';
 import 'package:filament_mobile/schema/panel_schema.dart';
 import 'package:filament_mobile/schema/relation_descriptor.dart';
+import 'package:filament_mobile/schema/resource_labels.dart';
+import 'package:filament_mobile/schema/resource_schema.dart';
 import 'package:filament_mobile/schema/schema_component.dart';
 import 'package:filament_mobile/state/relation_list_provider.dart';
 import 'package:filament_mobile/ui/resource_card.dart';
 import 'package:filament_mobile/ui/relation_list_screen.dart';
+import 'package:filament_mobile/ui/resource_form_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -31,7 +34,12 @@ const _relation = RelationDescriptor(
 /// one page repeated or an empty array. Every other method throws —
 /// `RelationListScreen` never touches them.
 class _Source implements ResourceDataSource {
-  _Source({this.pagesOfRows = const [], this.error, this.failPage});
+  _Source({
+    this.pagesOfRows = const [],
+    this.error,
+    this.failPage,
+    this.writeResult = const WriteSuccess({}),
+  });
 
   /// Row payloads, one list per page. `pagesOfRows.length` is the last page.
   final List<List<Map<String, dynamic>>> pagesOfRows;
@@ -42,7 +50,16 @@ class _Source implements ResourceDataSource {
   /// renders the retry row.
   final int? failPage;
 
+  /// What the relation writes return; the delete flow tests drive both a
+  /// success and a denial through it.
+  final WriteResult writeResult;
+
   final List<int> requestedPages = [];
+
+  /// Which relation write fired, and the child id it carried — so a delete
+  /// test asserts the ROW's key reached the endpoint, not just "a call".
+  final List<String> writes = [];
+  Object? lastChildId;
 
   @override
   Future<PaginatedRecords> relation(
@@ -73,6 +90,49 @@ class _Source implements ResourceDataSource {
   }
 
   @override
+  Future<WriteResult> createRelation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation,
+    Map<String, dynamic> values,
+  ) async {
+    writes.add('create');
+    return writeResult;
+  }
+
+  @override
+  Future<WriteResult> updateRelation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation,
+    Object childId,
+    Map<String, dynamic> values,
+  ) async {
+    writes.add('update');
+    lastChildId = childId;
+    return writeResult;
+  }
+
+  @override
+  Future<WriteResult> deleteRelation(
+    String resourceKey,
+    Object id,
+    RelationDescriptor relation,
+    Object childId,
+  ) async {
+    writes.add('delete');
+    lastChildId = childId;
+    return writeResult;
+  }
+
+  /// The pushed row-edit form seeds itself from the CHILD resource's own
+  /// record read — a real answer, not a throw, so the edit-flow test renders
+  /// the form it pushed.
+  @override
+  Future<ResourceRecord> record(String resourceKey, Object id) async =>
+      ResourceRecord(id: id, attributes: const {'name': 'Sale'});
+
+  @override
   Future<PanelSchema> panel() async => throw UnimplementedError();
 
   @override
@@ -86,10 +146,6 @@ class _Source implements ResourceDataSource {
     String? sort,
     String? direction,
   }) => throw UnimplementedError();
-
-  @override
-  Future<ResourceRecord> record(String resourceKey, Object id) =>
-      throw UnimplementedError();
 
   @override
   Future<WriteResult> create(String resourceKey, Map<String, dynamic> values) =>
@@ -145,6 +201,7 @@ class _Source implements ResourceDataSource {
 Widget _screenFor(
   _Source source, {
   void Function(ResourceRecord)? onRecordTap,
+  ResourceSchema? childResource,
 }) {
   return MaterialApp(
     home: RelationListScreen(
@@ -154,10 +211,29 @@ Widget _screenFor(
         id: 7,
         relation: _relation,
       ),
+      childResource: childResource,
       onRecordTap: onRecordTap,
     ),
   );
 }
+
+/// The relation rows' own resource — a one-field form, so the pushed row
+/// form renders a real field, and a settable permissions block, which is
+/// what every affordance gate reads.
+ResourceSchema _childResource({
+  ResourcePermissions permissions = const ResourcePermissions(),
+}) => ResourceSchema(
+  key: 'tags',
+  labels: const ResourceLabels(singular: 'Tag', plural: 'Tags'),
+  permissions: permissions,
+  form: [
+    SchemaComponent.fromJson(const {
+      'type': 'text',
+      'name': 'name',
+      'label': 'Name',
+    }, 'form[0]'),
+  ],
+);
 
 void main() {
   testWidgets('shows the relation label as the screen title', (tester) async {
@@ -312,5 +388,190 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tapped!.id, 1);
+  });
+
+  group('row-write affordances (P9)', () {
+    const rows = [
+      [
+        {'id': 1, 'name': 'Sale'},
+      ],
+    ];
+
+    testWidgets('Add is drawn on the child resource\'s published create, and '
+        'pushes the child resource\'s form', (tester) async {
+      await tester.pumpWidget(
+        _screenFor(
+          _Source(pagesOfRows: rows),
+          childResource: _childResource(
+            permissions: const ResourcePermissions(create: true),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('relation.add')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ResourceFormScreen), findsOneWidget);
+      // The CHILD resource's own form and label — reused whole, not a
+      // relation-specific shape.
+      expect(find.text('Tag'), findsOneWidget);
+      expect(find.text('Name'), findsOneWidget);
+    });
+
+    testWidgets('no Add without a published create — and nothing at all '
+        'without a child resource', (tester) async {
+      await tester.pumpWidget(
+        _screenFor(_Source(pagesOfRows: rows), childResource: _childResource()),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('relation.add')), findsNothing);
+
+      // A null childResource — the descriptor published no `resource` key,
+      // or the host never resolved it — is the read-only shape: absence
+      // means unavailable, never a control the server would 404.
+      await tester.pumpWidget(_screenFor(_Source(pagesOfRows: rows)));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('relation.add')), findsNothing);
+      expect(find.byKey(const ValueKey('relation.row.edit')), findsNothing);
+      expect(find.byKey(const ValueKey('relation.row.delete')), findsNothing);
+    });
+
+    testWidgets('row edit and delete follow update/delete independently', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _screenFor(
+          _Source(pagesOfRows: rows),
+          childResource: _childResource(
+            permissions: const ResourcePermissions(update: true, delete: true),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('relation.row.edit')), findsOneWidget);
+      expect(find.byKey(const ValueKey('relation.row.delete')), findsOneWidget);
+      // create was not published, so no Add — the gates are independent.
+      expect(find.byKey(const ValueKey('relation.add')), findsNothing);
+    });
+
+    testWidgets('a delete-only permission draws delete and no edit', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _screenFor(
+          _Source(pagesOfRows: rows),
+          childResource: _childResource(
+            permissions: const ResourcePermissions(delete: true),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('relation.row.edit')), findsNothing);
+      expect(find.byKey(const ValueKey('relation.row.delete')), findsOneWidget);
+    });
+
+    testWidgets('row edit pushes the child form seeded from the child '
+        'resource\'s record read', (tester) async {
+      await tester.pumpWidget(
+        _screenFor(
+          _Source(pagesOfRows: rows),
+          childResource: _childResource(
+            permissions: const ResourcePermissions(update: true),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('relation.row.edit')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ResourceFormScreen), findsOneWidget);
+      // Seeded from the fake's record() — edit mode genuinely loaded.
+      expect(find.text('Name'), findsOneWidget);
+    });
+
+    testWidgets('row delete asks first, then deletes through the relation '
+        'endpoint and refreshes the page', (tester) async {
+      final source = _Source(pagesOfRows: rows);
+
+      await tester.pumpWidget(
+        _screenFor(
+          source,
+          childResource: _childResource(
+            permissions: const ResourcePermissions(delete: true),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('relation.row.delete')));
+      await tester.pumpAndSettle();
+
+      // The same confirmation as the record delete flow — nothing has fired
+      // yet.
+      expect(find.text('Delete this record?'), findsOneWidget);
+      expect(source.writes, isEmpty);
+
+      await tester.tap(find.text('Delete'));
+      await tester.pumpAndSettle();
+
+      expect(source.writes, ['delete']);
+      expect(source.lastChildId, 1);
+      // Page one re-fetched through the provider's own refresh.
+      expect(source.requestedPages, [1, 1]);
+    });
+
+    testWidgets('cancelling the confirmation deletes nothing', (tester) async {
+      final source = _Source(pagesOfRows: rows);
+
+      await tester.pumpWidget(
+        _screenFor(
+          source,
+          childResource: _childResource(
+            permissions: const ResourcePermissions(delete: true),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('relation.row.delete')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      expect(source.writes, isEmpty);
+      expect(source.requestedPages, [1]);
+    });
+
+    testWidgets('a denied delete surfaces the server\'s message and keeps '
+        'the rows', (tester) async {
+      final source = _Source(
+        pagesOfRows: rows,
+        writeResult: const WriteDenied('This action is unauthorized.'),
+      );
+
+      await tester.pumpWidget(
+        _screenFor(
+          source,
+          childResource: _childResource(
+            permissions: const ResourcePermissions(delete: true),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('relation.row.delete')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Delete'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('This action is unauthorized.'), findsOneWidget);
+      // A denial changed nothing, so no re-fetch.
+      expect(source.requestedPages, [1]);
+      expect(find.text('Sale'), findsOneWidget);
+    });
   });
 }

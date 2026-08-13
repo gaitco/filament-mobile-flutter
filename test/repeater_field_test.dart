@@ -1,6 +1,8 @@
 import 'package:filament_mobile/data/write_result.dart';
+import 'package:filament_mobile/data/options_page.dart';
 import 'package:filament_mobile/form/field_registry.dart';
 import 'package:filament_mobile/form/field_state.dart';
+import 'package:filament_mobile/form/fields/field_widgets.dart';
 import 'package:filament_mobile/ports/filament_strings.dart';
 import 'package:filament_mobile/schema/schema_component.dart';
 import 'package:filament_mobile/ui/resource_form_screen.dart';
@@ -180,6 +182,27 @@ void main() {
       expect(find.byKey(const ValueKey('repeater.add')), findsNothing);
     });
 
+    testWidgets('is absent when addable is false, however many rows', (
+      tester,
+    ) async {
+      // L16: the parse side of `config.addable` is pinned by the golden
+      // fixture; this is the widget half — the flag must actually remove the
+      // control, not merely parse.
+      await tester.pumpWidget(
+        repeaterHarness(
+          component: repeaterField(addable: false),
+          rows: [
+            {'sku': 'a'},
+          ],
+        ),
+      );
+
+      expect(find.byKey(const ValueKey('repeater.add')), findsNothing);
+      // The rows themselves still render — the gate is the affordance, not
+      // the data.
+      expect(find.byType(Card), findsOneWidget);
+    });
+
     testWidgets('tapping it appends a row', (tester) async {
       await tester.pumpWidget(
         repeaterHarness(
@@ -226,6 +249,26 @@ void main() {
       );
 
       expect(find.byKey(const ValueKey('repeater.remove.0')), findsNothing);
+    });
+
+    testWidgets('is absent on every row when deletable is false', (
+      tester,
+    ) async {
+      // L16's other half: `config.deletable` parsed (golden-covered) must
+      // remove the per-row control, on EVERY row — not just the first.
+      await tester.pumpWidget(
+        repeaterHarness(
+          component: repeaterField(deletable: false),
+          rows: [
+            {'sku': 'a'},
+            {'sku': 'b'},
+          ],
+        ),
+      );
+
+      expect(find.byKey(const ValueKey('repeater.remove.0')), findsNothing);
+      expect(find.byKey(const ValueKey('repeater.remove.1')), findsNothing);
+      expect(find.byType(Card), findsNWidgets(2));
     });
 
     testWidgets('tapping it removes that row, not another one', (tester) async {
@@ -508,6 +551,127 @@ void main() {
       );
 
       expect(find.text('HOST'), findsOneWidget);
+    },
+  );
+
+  /// Ledger L18. A `select` with `optionsUrl` inside a row used to render an
+  /// empty dropdown that never said why: `_childField` built each row
+  /// child's FieldState without `searchOptions` — and could not have used
+  /// the repeater's own, a closure already bound to the repeater's name. The
+  /// row now queries through the same per-field path a top-level select
+  /// gets (`FieldState.searchOptionsFor`), keyed by the child's own name,
+  /// which is what the endpoint resolves by.
+  testWidgets(
+    'a row select with optionsUrl resolves options, keyed by the child\'s '
+    'own name — the same lookup a top-level select gets',
+    (tester) async {
+      final source = FakeSource(
+        components: [
+          SchemaComponent.fromJson({
+            'type': 'repeater',
+            'name': 'line_items',
+            'label': 'Line items',
+            'children': [
+              {
+                'type': 'select',
+                'name': 'country_id',
+                'label': 'Country',
+                'config': {'optionsUrl': '/api/mobile-panel/banners/options'},
+              },
+            ],
+            'config': {'addable': true, 'deletable': true, 'readOnly': false},
+          }, 'form[0]'),
+        ],
+        optionsResponse: const OptionsPage(
+          options: [SelectOption(value: 3, label: 'Acme Ltd')],
+          hasMore: false,
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(home: ResourceFormScreen(provider: providerFor(source))),
+      );
+      await pumpUntilFound(tester, find.byKey(const ValueKey('repeater.add')));
+
+      await tester.tap(find.byKey(const ValueKey('repeater.add')));
+      await tester.pump();
+
+      // The row's select renders as the remote picker — a search affordance
+      // — not the empty inline dropdown that used to say nothing.
+      final rowSelect = find.descendant(
+        of: find.byKey(const ValueKey('repeater.line_items.row.0')),
+        matching: find.byType(RemoteSelectField),
+      );
+      expect(rowSelect, findsOneWidget);
+
+      await tester.tap(rowSelect);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Acme Ltd'), findsOneWidget);
+      expect(
+        source.lastOptionsField,
+        'country_id',
+        reason:
+            'the endpoint resolves a select by its own name — querying the '
+            'repeater\'s name would come back 422',
+      );
+    },
+  );
+
+  /// The P8 colour-check gap HANDOFF carried as Open: repeater rows
+  /// synthesised a fresh `dirty` set on every validation pass, so the
+  /// colour-format check — dirty-gated at the top level for the
+  /// legacy-record reason fix round 1, Finding 3 documents — never fired
+  /// inside a row at all. Row validation now treats row fields as dirty
+  /// (`_validateRows` in `client_validator.dart` says why that direction).
+  testWidgets(
+    'a malformed colour inside a repeater row blocks submission with the '
+    'error on that row — the same check the top level already ran',
+    (tester) async {
+      final source = FakeSource(
+        components: [
+          SchemaComponent.fromJson({
+            'type': 'repeater',
+            'name': 'line_items',
+            'label': 'Line items',
+            'children': [
+              {
+                'type': 'color',
+                'name': 'accent',
+                'label': 'Accent',
+                'config': {'format': 'hex'},
+              },
+            ],
+            'config': {'addable': true, 'deletable': true, 'readOnly': false},
+          }, 'form[0]'),
+        ],
+      );
+      await tester.pumpWidget(
+        MaterialApp(home: ResourceFormScreen(provider: providerFor(source))),
+      );
+      await pumpUntilFound(tester, find.byKey(const ValueKey('repeater.add')));
+
+      await tester.tap(find.byKey(const ValueKey('repeater.add')));
+      await tester.pump();
+      await tester.enterText(find.byType(TextField).first, 'not a color');
+
+      await tester.tap(find.byKey(const ValueKey('form.submit')));
+      await tester.pumpAndSettle();
+
+      expect(
+        source.writeCalls,
+        0,
+        reason: 'a blocked submit must not call out',
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('repeater.line_items.row.0')),
+          matching: find.text(const FilamentStrings().fieldColor),
+        ),
+        findsOneWidget,
+        reason:
+            'the row-scoped key `line_items.0.accent` must place the error '
+            'on the row, the same shape the required-child tests pin',
+      );
     },
   );
 }

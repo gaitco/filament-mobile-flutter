@@ -176,8 +176,12 @@ class _ResourceFormScreenState extends State<ResourceFormScreen> {
           enabled: !component.disabled && component.writable,
           // Only where `/schema` withheld the options. Every other field
           // ignores it, and a host that registers its own builder is free to
-          // as well.
+          // as well. The per-field variant is what a container's children —
+          // a remote select inside a repeater row — query through, bound to
+          // the child's own name (see FieldState.searchOptionsFor).
           searchOptions: (query) => provider.searchOptions(name, query),
+          searchOptionsFor: (field, query) =>
+              provider.searchOptions(field, query),
           // File-only, same story: every other field ignores both.
           filePicker: widget.filePicker,
           uploadFile: ({required bytes, required filename}) =>

@@ -1,5 +1,23 @@
 import 'package:filament_mobile/filament_mobile.dart';
 
+/// `--dart-define=DEMO_DIR=ltr` serves a left-to-right, English panel instead.
+///
+/// Defaults to **rtl**, and that default is load-bearing rather than a
+/// preference: the Arabic panel is what exercises both P6f behaviours end to
+/// end — every screen wrapping itself in `Directionality` from this value with
+/// no host wiring, and the grouped-digit isolation, which has nothing to prove
+/// under LTR. Flipping the default would quietly stop demonstrating the feature
+/// the fixture was built for.
+///
+/// `ltr` exists for the README captures, where an English audience reading a
+/// right-to-left screenshot of English labels learns the wrong thing about the
+/// package. Both directions are real panels; neither is a mock.
+const demoDirection = String.fromEnvironment('DEMO_DIR', defaultValue: 'rtl');
+
+/// Kept in step with [demoDirection] rather than set independently: an `ltr`
+/// panel still labelled `ar` would be a panel this server would never emit.
+const _demoLocale = demoDirection == 'rtl' ? 'ar' : 'en';
+
 /// An in-memory [FilamentTransport] serving a small e-commerce panel.
 /// The widget tree above it is the package's real one — only the wire is fake.
 class DemoTransport implements FilamentTransport, FilamentUploadTransport {
@@ -263,6 +281,13 @@ class DemoTransport implements FilamentTransport, FilamentUploadTransport {
             'subtitle': {'field': 'comment'},
           },
           'recordKey': 'id',
+          // P9: the child RESOURCE's key, which is what makes this relation
+          // writable rather than a read path. A real server publishes it only
+          // when exactly one registered resource owns the related model, and
+          // its absence is how every relation looked before 0.8.0 — so
+          // omitting it here left the demo unable to show the write
+          // affordances at all, which is why no screenshot of them existed.
+          'resource': 'reviews',
         },
     ],
   };
@@ -271,7 +296,7 @@ class DemoTransport implements FilamentTransport, FilamentUploadTransport {
     // `GET /dashboard` is its own direction carrier — it does not read
     // `/schema` — so an Arabic demo panel has to say so here too, or
     // `DEMO_SCREEN=dashboard` renders LTR under an `rtl` panel.
-    'direction': 'rtl',
+    'direction': demoDirection,
     'widgets': [
       {
         'type': 'stats',
@@ -400,8 +425,8 @@ class DemoTransport implements FilamentTransport, FilamentUploadTransport {
       // screen wraps itself in Directionality from this value with no host
       // wiring (see the Dart README's RTL and i18n section), and the
       // grouped-digit isolation below only has anything to prove under RTL.
-      'locale': 'ar',
-      'direction': 'rtl',
+      'locale': _demoLocale,
+      'direction': demoDirection,
       'navigation': [
         {
           'group': 'Shop',
@@ -418,7 +443,68 @@ class DemoTransport implements FilamentTransport, FilamentUploadTransport {
       _resource('categories', 'Category', 'Categories', 'tag', 'Shop'),
       _resource('customers', 'Customer', 'Customers', 'users', 'People'),
       _resource('staff', 'Staff member', 'Staff', 'briefcase', 'People'),
+      _reviewsResource,
     ],
+  };
+
+  /// The child resource behind the `reviews` relation — published so the
+  /// relation is WRITABLE (see the `resource` key on the relation descriptor).
+  ///
+  /// Deliberately NOT built through `_resource()`: that factory carries the
+  /// products form with its eleven field types, and a review's create/edit
+  /// form should be the three fields a review actually has. A relation row's
+  /// form is the child resource's own, reused whole, so this is what a reviewer
+  /// sees on Add and on a row's edit.
+  ///
+  /// Absent from `navigation` on purpose. A child resource reachable only
+  /// through its parent is an ordinary shape — Filament resources are not
+  /// obliged to be navigable — and listing it in the index would put a
+  /// top-level "Reviews" entry beside Products for no reason.
+  static final Map<String, dynamic> _reviewsResource = {
+    'key': 'reviews',
+    'labels': {'singular': 'Review', 'plural': 'Reviews', 'icon': 'star'},
+    // All three, because the point of the fixture is the affordances: Add
+    // comes from `create`, the per-row pencil from `update`, the bin from
+    // `delete`. A false flag renders NO control rather than a disabled one, so
+    // a partial set here would quietly under-demonstrate the feature.
+    'permissions': _perms,
+    'recordKey': 'id',
+    'card': {
+      'title': {'field': 'author'},
+      'subtitle': {'field': 'comment'},
+    },
+    'search': {'enabled': false},
+    'sorts': <Map<String, dynamic>>[],
+    'form': [
+      {
+        'type': 'text',
+        'name': 'author',
+        'label': 'Author',
+        'rules': {'required': true, 'max': 80},
+      },
+      {
+        'type': 'textarea',
+        'name': 'comment',
+        'label': 'Comment',
+        'rules': {'required': true, 'max': 400},
+      },
+      {
+        'type': 'select',
+        'name': 'rating',
+        'label': 'Rating',
+        'rules': {'required': true},
+        'config': {
+          'options': [
+            {'value': '5', 'label': '5 — Excellent'},
+            {'value': '4', 'label': '4 — Good'},
+            {'value': '3', 'label': '3 — Fair'},
+            {'value': '2', 'label': '2 — Poor'},
+            {'value': '1', 'label': '1 — Bad'},
+          ],
+        },
+      },
+    ],
+    'relations': <Map<String, dynamic>>[],
   };
 
   /// A `<field>.__rich` sibling built from plain text — one paragraph, no
@@ -503,6 +589,13 @@ class DemoTransport implements FilamentTransport, FilamentUploadTransport {
   };
 
   static List<Map<String, dynamic>> _rows(String key) => switch (key) {
+    // The child resource reads its own records through the ordinary record
+    // endpoint, exactly as the real client does: `RelationListScreen`'s row
+    // edit pushes the CHILD resource's form, and that form prefills from
+    // `GET /reviews/{id}` rather than from the relation row it was tapped on.
+    // Without this case the edit form would open blank on a row that plainly
+    // has content.
+    'reviews' => _reviews,
     'products' => [
       {
         ..._row(1, 'Aurora Desk Lamp', 'Warm-dim brass lamp', 'Active', 89),

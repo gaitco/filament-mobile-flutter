@@ -3,12 +3,22 @@ import 'package:filament_mobile_example/demo_transport.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('demo schema parses into two groups and four resources', () async {
+  test('demo schema parses into two groups and five resources', () async {
     final source = RestResourceDataSource(transport: DemoTransport());
     final panel = await source.panel();
 
-    expect(panel.resources, hasLength(4));
+    // Five resources, two groups: `reviews` is the child resource behind the
+    // products relation — published so that relation is WRITABLE — and it is
+    // deliberately absent from `navigation`, because a resource reachable only
+    // through its parent has no business as a top-level index entry. The two
+    // counts disagreeing is the point, so both are asserted.
+    expect(panel.resources, hasLength(5));
     expect(panel.navigation.map((g) => g.group), ['Shop', 'People']);
+    expect(panel.resource('reviews'), isNotNull);
+    expect(
+      panel.navigation.expand((g) => g.resources),
+      isNot(contains('reviews')),
+    );
   });
 
   test('products list and record round-trip', () async {

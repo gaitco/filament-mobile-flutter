@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.8.2 — 2026-08-13
+
+Documentation and example only — no library code changed.
+
+**The README shows the client now.** Its images predated 0.7.0's visual pass
+over the same screens they pictured, so pub.dev advertised a UI that no longer
+existed. Five screens recaptured, and three images added where they answer
+something: the field-type gallery under "Field types this client renders", the
+relation write flow under "Relations", and the dashboard under "Dashboard".
+
+**The example can reach every screen.** `DEMO_SCREEN` gained `relations` and
+`relation_form`, so P9's row writes — Add in the bar, edit and delete per row,
+and the child resource's own form they open — are reachable without tapping
+through; the demo's relation now publishes a `resource` key and a `reviews`
+child resource, without which none of those controls exist to look at.
+`DEMO_DIR=ltr` serves a left-to-right panel (the fixture stays Arabic by
+default, since that is what exercises the direction wrap), and `DEMO_SCROLL`
+opens a form already scrolled, which is how one form taller than a phone can
+show all eleven of its field types.
+
+Two demo defects went with it: the dashboard was rendered bare as `home:`,
+without the host chrome `DashboardScreen` deliberately does not own, so it
+painted onto black; and its scroll controller is now owned and disposed by the
+State rather than built in `build()`.
+
 ## 0.8.1 — 2026-08-13
 
 **A row's form no longer leaks its provider.** `RelationListScreen` built the

@@ -96,6 +96,8 @@ weaknesses** list stating plainly what it does not do.
 
 ## Field types this client renders
 
+![Form field types](https://raw.githubusercontent.com/gaitco/filament-mobile-flutter/main/art/inputs.png)
+
 Every wire type the server can publish for a **form** has a built-in widget:
 
 `text` · `textarea` · `email` · `password` · `number` · `select` ·
@@ -690,6 +692,8 @@ rather than normalising it: a bare `"09:00"` and a full
 
 *A labelled section on the record screen; "See all" opens the full list.*
 
+![Relation writes](https://raw.githubusercontent.com/gaitco/filament-mobile-flutter/main/art/relations.png)
+
 `ResourceSchema.relations` (`List<RelationDescriptor>`, **always present** —
 `[]` when the server publishes none, and read the same way on an *absent*
 `relations` key: a server predating this feature) is what a resource's
@@ -1145,6 +1149,8 @@ be masked by a stale panel sitting in `success`.
 ## Dashboard
 
 *Stats render; charts come from the opt-in sibling package, or your own builder.*
+
+![Dashboard and charts](https://raw.githubusercontent.com/gaitco/filament-mobile-flutter/main/art/charts.png)
 
 `DashboardProvider` + `DashboardScreen` follow the same provider/screen
 shape as every other read screen: `LoadStatus`, skeleton-first loading,

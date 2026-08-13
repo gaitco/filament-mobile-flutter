@@ -218,29 +218,49 @@ class _RelationListScreenState extends State<RelationListScreen> {
   /// page's membership, and `refresh()` — the reload the provider already
   /// owns — is the cheapest correct response whether the form was saved or
   /// abandoned (a back-out costs one harmless re-fetch).
+  ///
+  /// The provider is built HERE and disposed in the `finally`, not inline in
+  /// the route's `builder`. Two reasons, and the second is the leak:
+  /// `builder` runs again on any route rebuild, so a fresh provider would
+  /// replace the live one mid-edit; and `ResourceFormScreen` does not own what
+  /// it is handed, so nothing else would ever dispose it. Only
+  /// `ResourceFormProvider.dispose()` cancels the 400 ms `/state` debounce, so
+  /// backing out of a row's form just after typing left a timer to fire
+  /// against a provider nobody was listening to, and every Add or Edit tap
+  /// leaked one notifier for the life of this screen.
   Future<void> _openForm({ResourceRecord? record}) async {
     final child = widget.childResource;
     // Fail-closed like the affordances: no published child resource, no form.
     if (child == null) return;
 
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (context) => ResourceFormScreen(
-          provider: ResourceFormProvider(
-            source: widget.provider.source,
-            resource: child,
-            strings: widget.strings,
-            recordId: record?.id,
-            submitTarget: RelationSubmitTarget(
-              resourceKey: widget.provider.resourceKey,
-              recordId: widget.provider.id,
-              relation: widget.provider.relation,
-            ),
-          ),
-          filePicker: widget.filePicker,
-        ),
+    final formProvider = ResourceFormProvider(
+      source: widget.provider.source,
+      resource: child,
+      strings: widget.strings,
+      recordId: record?.id,
+      submitTarget: RelationSubmitTarget(
+        resourceKey: widget.provider.resourceKey,
+        recordId: widget.provider.id,
+        relation: widget.provider.relation,
       ),
     );
+
+    try {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (context) => ResourceFormScreen(
+            provider: formProvider,
+            filePicker: widget.filePicker,
+          ),
+        ),
+      );
+    } finally {
+      // In a `finally` so a push that throws still cleans up. Safe the instant
+      // the route is popped: the provider guards its own post-disposal
+      // notifications with `_disposed`, so an in-flight submit that lands
+      // after this settles quietly instead of calling a dead notifier.
+      formProvider.dispose();
+    }
 
     widget.provider.refresh();
   }

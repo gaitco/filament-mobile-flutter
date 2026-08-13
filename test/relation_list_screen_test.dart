@@ -222,15 +222,19 @@ Widget _screenFor(
 /// what every affordance gate reads.
 ResourceSchema _childResource({
   ResourcePermissions permissions = const ResourcePermissions(),
+  bool live = false,
 }) => ResourceSchema(
   key: 'tags',
   labels: const ResourceLabels(singular: 'Tag', plural: 'Tags'),
   permissions: permissions,
   form: [
-    SchemaComponent.fromJson(const {
+    SchemaComponent.fromJson({
       'type': 'text',
       'name': 'name',
       'label': 'Name',
+      // `live` arms ResourceFormProvider's 400 ms `/state` debounce, which is
+      // the timer the disposal test below needs in flight.
+      if (live) 'live': true,
     }, 'form[0]'),
   ],
 );
@@ -417,6 +421,46 @@ void main() {
       // relation-specific shape.
       expect(find.text('Tag'), findsOneWidget);
       expect(find.text('Name'), findsOneWidget);
+    });
+
+    testWidgets('the form it pushes is DISPOSED on the way back, so a live '
+        'field\'s /state debounce cannot fire after the pop', (tester) async {
+      // The leak: the provider used to be built inline in the route's
+      // `builder`, and `ResourceFormScreen` does not own what it is handed, so
+      // nothing ever disposed it — one leaked notifier per Add/Edit tap, and
+      // `dispose()` is the only thing that cancels the `/state` debounce.
+      //
+      // This fake's `state()` throws UnimplementedError, so a timer that
+      // survives the pop fails this test by firing, not merely by lingering.
+      await tester.pumpWidget(
+        _screenFor(
+          _Source(pagesOfRows: rows),
+          childResource: _childResource(
+            permissions: const ResourcePermissions(create: true),
+            live: true,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('relation.add')));
+      await tester.pumpAndSettle();
+
+      final provider = tester
+          .widget<ResourceFormScreen>(find.byType(ResourceFormScreen))
+          .provider;
+
+      // Type, then leave immediately — the debounce is armed and unfired.
+      await tester.enterText(find.byType(TextField).first, 'typed');
+      await tester.pump();
+
+      await tester.pageBack();
+      await tester.pumpAndSettle(const Duration(seconds: 1));
+
+      expect(find.byType(ResourceFormScreen), findsNothing);
+      // Already disposed, so disposing again trips ChangeNotifier's own
+      // assertion — the only handle a test has on "was it disposed".
+      expect(provider.dispose, throwsA(isA<Error>()));
     });
 
     testWidgets('no Add without a published create — and nothing at all '

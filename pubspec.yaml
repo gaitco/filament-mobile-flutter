@@ -1,6 +1,6 @@
 name: filament_mobile
 description: Renders a Laravel Filament 5 panel as a native Flutter mobile admin.
-version: 0.8.0
+version: 0.8.1
 homepage: https://github.com/gaitco/filament-mobile-flutter
 repository: https://github.com/gaitco/filament-mobile-flutter
 issue_tracker: https://github.com/gaitco/filament-mobile-flutter/issues

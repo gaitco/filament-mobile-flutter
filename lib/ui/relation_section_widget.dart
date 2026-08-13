@@ -83,6 +83,14 @@ class _RelationSectionWidgetState extends State<RelationSectionWidget> {
   List<ResourceRecord> _records = const [];
   bool _hasMore = false;
 
+  /// Bumped by every [_load] — the same drop-stale-response guard
+  /// `RelationListProvider._requestId` uses, and needed here for the same
+  /// reason now that a load can be triggered by something other than
+  /// `initState`: the parent's listener fires on every one of its reloads, so
+  /// two quick pull-to-refreshes queue two fetches, and without this the one
+  /// that answers LAST wins rather than the one asked last.
+  int _requestId = 0;
+
   @override
   void initState() {
     super.initState();
@@ -118,7 +126,17 @@ class _RelationSectionWidgetState extends State<RelationSectionWidget> {
   }
 
   Future<void> _load() async {
-    setState(() => _status = LoadStatus.loading);
+    final requestId = ++_requestId;
+
+    // Only blank the section when there is nothing worth keeping. A
+    // parent-triggered refetch already has good rows on screen, and flashing
+    // them to a spinner on every record reload made a section that was
+    // *already correct* look like it was loading for the first time. Derived
+    // from the status rather than passed in by each caller, so a future
+    // trigger cannot forget to ask for it.
+    if (_status != LoadStatus.success) {
+      setState(() => _status = LoadStatus.loading);
+    }
 
     final PaginatedRecords page;
     try {
@@ -140,12 +158,15 @@ class _RelationSectionWidgetState extends State<RelationSectionWidget> {
       // Never rethrown, and never left `loading`: a thrown error here is
       // exactly the shape of the incident this widget exists to prevent —
       // see the class doc.
-      if (!mounted) return;
+      if (!mounted || requestId != _requestId) return;
       setState(() => _status = LoadStatus.failure);
       return;
     }
 
-    if (!mounted) return;
+    // A superseded response is dropped rather than rendered: it is a page the
+    // caller stopped asking for, and settling it would put older rows over
+    // newer ones for as long as nothing else reloads.
+    if (!mounted || requestId != _requestId) return;
     setState(() {
       _records = page.records;
       _hasMore = page.meta.hasMore;

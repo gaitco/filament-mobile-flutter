@@ -449,6 +449,108 @@ void main() {
         expect(fetches, 2);
       });
 
+      testWidgets('a parent reload keeps the rows on screen — no spinner over '
+          'a section that is already correct', (tester) async {
+        final source = _RecordSource();
+        final parent = ResourceViewProvider(
+          source: source,
+          resource: _resource,
+          id: 7,
+        );
+        await parent.load();
+
+        final gate = <Completer<PaginatedRecords>>[];
+        await tester.pumpWidget(
+          _harness(parent: parent, ({int page = 1}) {
+            final completer = Completer<PaginatedRecords>();
+            gate.add(completer);
+            return completer.future;
+          }),
+        );
+
+        // First load: nothing to keep, so a spinner is right.
+        await tester.pump();
+        expect(find.byType(CircularProgressIndicator), findsOneWidget);
+        gate.first.complete(
+          _page([
+            {'id': 1, 'name': 'Row one'},
+          ]),
+        );
+        await pumpUntilFound(tester, find.text('Row one'));
+
+        // Parent reload: the rows are still good, so they stay put while the
+        // refetch is in flight. Flashing them away made a correct section look
+        // like a first load on every record reload.
+        await parent.load();
+        await tester.pump();
+
+        expect(gate.length, 2, reason: 'the reload did fetch');
+        expect(find.text('Row one'), findsOneWidget);
+        expect(find.byType(CircularProgressIndicator), findsNothing);
+
+        gate.last.complete(
+          _page([
+            {'id': 1, 'name': 'Row two'},
+          ]),
+        );
+        await pumpUntilFound(tester, find.text('Row two'));
+      });
+
+      testWidgets('two overlapping reloads settle in ASK order, not answer '
+          'order — the stale page is dropped', (tester) async {
+        final source = _RecordSource();
+        final parent = ResourceViewProvider(
+          source: source,
+          resource: _resource,
+          id: 7,
+        );
+        await parent.load();
+
+        final gate = <Completer<PaginatedRecords>>[];
+        await tester.pumpWidget(
+          _harness(parent: parent, ({int page = 1}) {
+            final completer = Completer<PaginatedRecords>();
+            gate.add(completer);
+            return completer.future;
+          }),
+        );
+        await tester.pump();
+        gate.first.complete(
+          _page([
+            {'id': 1, 'name': 'Original'},
+          ]),
+        );
+        await pumpUntilFound(tester, find.text('Original'));
+
+        // Two parent reloads in quick succession — a double pull-to-refresh.
+        await parent.load();
+        await tester.pump();
+        await parent.load();
+        await tester.pump();
+
+        expect(gate.length, 3, reason: 'both reloads fetched');
+
+        // The SECOND answers first, then the first answers late. Without the
+        // request-id guard the late one wins and the section shows the page
+        // nobody asked for last.
+        gate[2].complete(
+          _page([
+            {'id': 1, 'name': 'Newest'},
+          ]),
+        );
+        await pumpUntilFound(tester, find.text('Newest'));
+
+        gate[1].complete(
+          _page([
+            {'id': 1, 'name': 'Superseded'},
+          ]),
+        );
+        await tester.pump();
+
+        expect(find.text('Newest'), findsOneWidget);
+        expect(find.text('Superseded'), findsNothing);
+      });
+
       testWidgets('a swapped parent (didUpdateWidget) is re-subscribed: the '
           'old provider no longer drives the section, the new one does', (
         tester,

@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.8.1 — 2026-08-13
+
+**A row's form no longer leaks its provider.** `RelationListScreen` built the
+`ResourceFormProvider` for an Add or Edit inline in the route's `builder`, and
+`ResourceFormScreen` does not own what it is handed — so nothing ever disposed
+it. One leaked notifier per tap, and since `dispose()` is the only thing that
+cancels the 400 ms `/state` debounce, backing out of a row's form just after
+typing left a timer to fire a request against a provider nobody was listening
+to. It is now built before the push and disposed in a `finally`, which also
+fixes the quieter half of the bug: a route `builder` runs again on any rebuild,
+so a fresh provider could have replaced the live one mid-edit.
+
+**A relation section no longer races itself or blinks.**
+`RelationSectionWidget` gained the drop-stale-response guard
+`RelationListProvider` already had: the parent's listener fires on every one of
+its reloads, so two quick pull-to-refreshes queued two fetches and whichever
+answered LAST won rather than the one asked last — a section could settle on
+older rows and keep them until something else reloaded. And a parent-triggered
+refetch no longer flashes the rows to a spinner: with good rows already on
+screen there is nothing worth blanking, so a section that was already correct
+stops looking like a first load on every record reload. Derived from the status
+rather than passed in per caller, so a future trigger cannot forget to ask.
+
 ## 0.8.0 — 2026-08-13
 
 **Relation writes, against the matching Laravel 0.6.0.** A relation whose

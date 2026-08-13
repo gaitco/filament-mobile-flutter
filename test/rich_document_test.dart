@@ -1,9 +1,10 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:filament_mobile/schema/json_reader.dart';
 import 'package:filament_mobile/schema/rich_document.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'support/contract_goldens.dart';
 
 /// Read from `contract/record-payload.json` — the golden RecordSnapshotTest
 /// writes through the real `/api/mobile-panel/rich/{id}` endpoint over the
@@ -19,7 +20,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// this one resolves the real bold-run-and-link document rather than a
 /// stand-in.
 final bannerBodyHtmlRich =
-    (jsonDecode(File('../../contract/record-payload.json').readAsStringSync())
+    (jsonDecode(contractFile('record-payload.json').readAsStringSync())
             as Map<String, dynamic>)['data']['body_html.__rich']
         as Map<String, dynamic>;
 

@@ -1,0 +1,49 @@
+name: ci
+
+# This file lives inside the PACKAGE, not at the monorepo root, so
+# `git archive HEAD dart/filament_mobile` carries it into the public mirror
+# (`gaitco/filament-mobile-flutter`) on every `scripts/update-mirrors.sh` run.
+#
+# Two reasons it runs there rather than in the monorepo:
+#
+# 1. Cost. The monorepo is private and must stay private (its history holds
+#    client-identifying pilot writeups), and a private repo spends the org's
+#    2,000 free Actions minutes a month. A public repo spends nothing, so this
+#    runs on every push forever without a card on file.
+# 2. Fidelity. The mirror IS the artifact — the same tree that goes to pub.dev.
+#    Testing it is strictly closer to what a user installs than testing the
+#    monorepo's copy of it.
+#
+# No `paths:` filter, unlike the monorepo original: here the package is the
+# whole repository, so everything is in scope by definition.
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      # The global rules ask for it and it drifts — nine files needed it at
+      # the 0.8.0 release. Cheap enough to gate on.
+      - run: dart format --output=none --set-exit-if-changed .
+      # Warnings and errors fail; the analyzer's six long-standing `info`s do
+      # not — three in `lib/` (`prefer_initializing_formals`) and three in
+      # tests. `--fatal-infos` is the day someone clears them.
+      - run: dart analyze
+      # Pinned west of UTC, and not decoration: `DateFieldWidget` clamps a
+      # picker's initial date on the calendar day rather than the instant,
+      # because `showDatePicker` compares its bounds date-only. That
+      # distinction is only observable at a negative UTC offset — at or east
+      # of UTC a local calendar day is never behind the UTC day of the same
+      # instant, so an instant-wise clamp passes the whole suite. A runner
+      # left on UTC would silently stop testing the fix. See the skipped-
+      # unless-west-of-UTC test in test/date_field_test.dart.
+      - run: flutter test
+        env:
+          TZ: Pacific/Niue

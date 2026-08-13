@@ -1,9 +1,8 @@
-import 'dart:convert';
-import 'dart:io';
-
 import 'package:filament_mobile/data/paginated_records.dart';
 import 'package:filament_mobile/data/resource_record.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'support/contract_goldens.dart';
 
 /// Contract-golden parsing for the two endpoint shapes `contract_test.dart`
 /// does not cover: the record payload (`contract/record-payload.json`,
@@ -12,9 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// RelationSnapshotTest). Both goldens are real server output; these tests
 /// prove the Dart types read them, closing the same loop
 /// `laravel_contract_test.dart` closes for `/schema`.
-Map<String, dynamic> golden(String name) =>
-    jsonDecode(File('../../contract/$name').readAsStringSync())
-        as Map<String, dynamic>;
+Map<String, dynamic> golden(String name) => contractJson(name);
 
 void main() {
   group('record-payload.json', () {

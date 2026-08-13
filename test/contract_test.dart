@@ -1,14 +1,11 @@
-import 'dart:convert';
-import 'dart:io';
-
 import 'package:filament_mobile/dashboard/dashboard_data.dart';
 import 'package:filament_mobile/schema/panel_schema.dart';
 import 'package:filament_mobile/schema/schema_component.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-Map<String, dynamic> fixture(String name) =>
-    jsonDecode(File('../../contract/$name').readAsStringSync())
-        as Map<String, dynamic>;
+import 'support/contract_goldens.dart';
+
+Map<String, dynamic> fixture(String name) => contractJson(name);
 
 void main() {
   group('contract/panel.json', () {

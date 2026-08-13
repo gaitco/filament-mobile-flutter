@@ -1,11 +1,12 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:filament_mobile/form/field_registry.dart';
 import 'package:filament_mobile/form/field_state.dart';
 import 'package:filament_mobile/schema/schema_component.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'support/contract_goldens.dart';
 
 /// Every `type` string a **form** node (never `infolist` — those are entry
 /// types this registry deliberately never renders) carries in the committed
@@ -15,8 +16,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// `fixture()` reads, from the same relative path.
 Set<String> _writableTypesIn(String file) {
   final panel =
-      jsonDecode(File('../../contract/$file').readAsStringSync())
-          as Map<String, dynamic>;
+      jsonDecode(contractFile(file).readAsStringSync()) as Map<String, dynamic>;
   const layoutTypes = {'section', 'grid', 'tabs', 'fieldset'};
   final types = <String>{};
 

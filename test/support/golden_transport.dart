@@ -1,7 +1,8 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:filament_mobile/ports/filament_transport.dart';
+
+import 'contract_goldens.dart';
 
 /// Serves the real Laravel output committed at `contract/laravel-panel.json`.
 ///
@@ -13,7 +14,7 @@ class GoldenTransport implements FilamentTransport {
   final List<Map<String, dynamic>> rows;
 
   static Map<String, dynamic> get panelJson =>
-      jsonDecode(File('../../contract/laravel-panel.json').readAsStringSync())
+      jsonDecode(contractFile('laravel-panel.json').readAsStringSync())
           as Map<String, dynamic>;
 
   @override

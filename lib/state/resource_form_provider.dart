@@ -205,11 +205,13 @@ class ResourceFormProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Uploads bytes for a single-file field and applies the outcome.
+  /// Uploads bytes for a file field and applies the outcome.
   ///
-  /// Success goes through [change] — the field's value becomes the stored
-  /// path, and any stale error on it clears the same way any other edit
-  /// clears one.
+  /// Success goes through [change] — a single-file field's value becomes
+  /// the stored path; a multiple field's value gains it, one append per
+  /// upload call, because the endpoint serves one file per request and the
+  /// client loops. Either way any stale error on the field clears the same
+  /// way any other edit clears one.
   ///
   /// Failure routes on [UploadFailed.statusCode], the same way [submit]
   /// routes a write's `422` by field name: a `422` is *this* field's own
@@ -242,7 +244,7 @@ class ResourceFormProvider extends ChangeNotifier {
 
     switch (result) {
       case UploadSuccess(:final path):
-        change(name, path);
+        change(name, _uploadedValue(name, path));
       case UploadFailed(:final message, :final statusCode)
           when statusCode == 422:
         _fieldErrors = Map.unmodifiable({
@@ -256,6 +258,25 @@ class ResourceFormProvider extends ChangeNotifier {
             : message;
         _notify();
     }
+  }
+
+  /// What a successful upload stores: the path itself for a single-file
+  /// field, or the field's current list plus the path for a multiple one.
+  /// The current value is read defensively — a scalar sitting under a
+  /// multiple field (a server's mistake the widget tolerates on read) is
+  /// replaced by the new list, since a submission replaces the whole set
+  /// wholesale either way.
+  Object _uploadedValue(String name, String path) {
+    for (final field in writableFields(_components)) {
+      if (field.name == name && field is FileComponent && field.multiple) {
+        final current = _values[name];
+        final paths = current is List
+            ? current.whereType<String>().toList()
+            : <String>[];
+        return [...paths, path];
+      }
+    }
+    return path;
   }
 
   /// Validates client-side first, then writes. Returns true only when saved.
@@ -416,8 +437,9 @@ class ResourceFormProvider extends ChangeNotifier {
 
   /// Only a renderable field can be edited, so this doubles as the liveness
   /// lookup — reusing the one shared descent rather than adding a third copy
-  /// of it. A `file` field is excluded by that walk and so never goes live;
-  /// this build cannot upload one anyway.
+  /// of it. A read-only `file` field is excluded by that walk and so never
+  /// goes live; there is nothing to re-evaluate on a field the server will
+  /// not take a value from.
   bool _isLive(String name) {
     for (final field in writableFields(_components)) {
       if (field.name == name) return field.live;

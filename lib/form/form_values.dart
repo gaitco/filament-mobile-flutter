@@ -102,6 +102,8 @@ class FormValues {
       TextComponent(:final defaultValue) => defaultValue,
       NumberComponent(:final defaultValue) => defaultValue,
       SelectComponent(:final defaultValue) => defaultValue,
+      ToggleButtonsComponent(:final defaultValue) => defaultValue,
+      SliderComponent(:final defaultValue) => defaultValue,
       BooleanComponent(:final defaultValue) => defaultValue,
       DateComponent(:final defaultValue) => defaultValue,
       ColorComponent(:final defaultValue) => defaultValue,

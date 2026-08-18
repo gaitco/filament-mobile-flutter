@@ -13,11 +13,17 @@ SchemaComponent timeField(
   String? minDate,
   String? maxDate,
   bool seconds = false,
+  int? minutesStep,
 }) => SchemaComponent.fromJson({
   'type': 'time',
   'name': name,
   'label': name,
-  'config': {'minDate': minDate, 'maxDate': maxDate, 'seconds': seconds},
+  'config': {
+    'minDate': minDate,
+    'maxDate': maxDate,
+    'seconds': seconds,
+    'minutesStep': minutesStep,
+  },
 }, 'form[0]');
 
 /// [alwaysUse24Hour] overrides the clock format for the *field* only. The
@@ -427,5 +433,26 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(TimePickerDialog), findsNothing);
+  });
+
+  testWidgets('a declared minute step does not snap or restrict the pick', (
+    tester,
+  ) async {
+    // P13. `minutesStep` is advisory — published for hosts rendering their
+    // own pickers, parsed here and deliberately not acted on: the stock
+    // Material picker has no step grid, and the server does not enforce
+    // steps either, so snapping would make mobile stricter than the panel it
+    // mirrors. 10:07 is off a 15-minute grid and must report verbatim.
+    final component = timeField('opens_at', minutesStep: 15);
+    expect((component as DateComponent).minutesStep, 15);
+
+    Object? reported;
+    await tester.pumpWidget(
+      timeHarness(component: component, onChanged: (v) => reported = v),
+    );
+
+    await pickTime(tester, '10', '07');
+
+    expect(reported, '10:07');
   });
 }

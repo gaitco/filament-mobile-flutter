@@ -64,6 +64,19 @@ void main() {
       expect((byName['country_id']! as SelectComponent).optionsUrl, isNotNull);
       expect(byName['country_id']!.live, isTrue);
       expect(byName['city_id']!.hidden, isTrue);
+      // P10. Both new wire shapes sit in this section, hand-written like the
+      // rest of panel.json; the real emitted ones are pinned in the
+      // laravel-panel.json group below.
+      final status = byName['status']! as ToggleButtonsComponent;
+      expect(status.multiple, isFalse);
+      expect(status.options.map((o) => o.value), ['draft', 'active']);
+      expect(status.rules.required, isTrue);
+      final satisfaction = byName['satisfaction']! as SliderComponent;
+      expect(satisfaction.min, 0);
+      expect(satisfaction.max, 100);
+      expect(satisfaction.step, 5);
+      expect(satisfaction.multiple, isFalse);
+      expect(satisfaction.rules.numeric, isTrue);
       expect(
         (byName['is_active']! as BooleanComponent).kind,
         BooleanKind.toggle,
@@ -75,8 +88,59 @@ void main() {
       expect((byName['born_at']! as DateComponent).kind, DateKind.date);
       expect((byName['born_at']! as DateComponent).maxDate, isNotNull);
       expect((byName['verified_at']! as DateComponent).kind, DateKind.datetime);
-      expect(section.children, hasLength(12));
-      expect(byName.keys.whereType<String>(), hasLength(12));
+      // P13. panel.json's first time node, hand-added like the rest of this
+      // fixture: `minutesStep` publishes only because it is > 1, the other
+      // steps stay absent and parse as the vendor default, 1. Advisory — no
+      // widget acts on them.
+      final opensAt = byName['opens_at']! as DateComponent;
+      expect(opensAt.kind, DateKind.time);
+      expect(opensAt.seconds, isFalse);
+      expect(opensAt.hoursStep, 1);
+      expect(opensAt.minutesStep, 15);
+      expect(opensAt.secondsStep, 1);
+      // P12. A single and a fully-hinted multiple file node, hand-written
+      // like the rest of panel.json; the real emitted ones are pinned in
+      // laravel_contract_test.dart.
+      expect((byName['avatar']! as FileComponent).multiple, isFalse);
+      final attachments = byName['attachments']! as FileComponent;
+      expect(attachments.multiple, isTrue);
+      expect(attachments.accept, ['image/png', 'image/jpeg']);
+      expect(attachments.maxSizeKb, 1024);
+      expect(attachments.maxFiles, 3);
+      expect(attachments.minFiles, 1);
+      expect(section.children, hasLength(17));
+      expect(byName.keys.whereType<String>(), hasLength(17));
+    });
+
+    test('every file node publishes multiple, false for single', () {
+      // P12: a current server publishes `multiple` on every `file` node;
+      // absence means a pre-P12 server and reads as false. Pinned on the raw
+      // JSON because the parser deliberately defaults an absent key — only
+      // the raw document can prove the key was there.
+      final fileNodes = <Map<String, dynamic>>[];
+
+      void walk(List<dynamic> nodes) {
+        for (final node in nodes) {
+          final map = node as Map<String, dynamic>;
+          if (map['type'] == 'file') fileNodes.add(map);
+          walk(map['children'] as List? ?? const []);
+        }
+      }
+
+      for (final resource in fixture('panel.json')['resources'] as List) {
+        final map = resource as Map<String, dynamic>;
+        walk(map['form'] as List? ?? const []);
+        walk(map['infolist'] as List? ?? const []);
+      }
+
+      expect(fileNodes, isNotEmpty);
+      for (final node in fileNodes) {
+        expect(
+          (node['config'] as Map)['multiple'],
+          isA<bool>(),
+          reason: 'file node ${node['name']} has no multiple key',
+        );
+      }
     });
 
     test('the second form node covers tabs, fieldset and the rest of §5.3', () {
@@ -121,6 +185,26 @@ void main() {
       expect(posts.recordKey, 'id');
       expect(posts.search.enabled, isFalse);
       expect(posts.form, isEmpty);
+    });
+
+    test('the users relation node carries the P11 search and sorts blocks', () {
+      // P11: every relation node on a current server publishes the same
+      // `search`/`sorts` shapes the resource block does. panel.json's `roles`
+      // node is hand-written like the rest of this fixture; the real emitted
+      // ones are pinned in the laravel-panel.json group below.
+      final users = panel.resource('users')!;
+      final roles = users.relations.single;
+
+      expect(roles.key, 'roles');
+      expect(roles.search.enabled, isTrue);
+      expect(roles.sorts.single.key, 'name');
+      expect(roles.sorts.single.isDefault, isTrue);
+      expect(roles.defaultSort!.direction, 'asc');
+
+      // The pre-P11 absence rule: a node without the keys parses as disabled
+      // search and no sorts — never an error. Covered against hand-built JSON
+      // in relation_descriptor_test.dart.
+      expect(panel.resource('posts')!.relations, isEmpty);
     });
   });
 
@@ -283,6 +367,12 @@ void main() {
       expect(opensAt.maxDate, DateTime.utc(1970, 1, 1, 17));
       expect(opensAt.seconds, isFalse);
       expect(opensAt.unreadableBounds, isEmpty);
+      // P13. panel.json's first stepped node: `minutesStep` publishes only
+      // because it is > 1; the other two stay absent and parse as the vendor
+      // default, 1. Advisory — the widget deliberately does not act on them.
+      expect(opensAt.hoursStep, 1);
+      expect(opensAt.minutesStep, 15);
+      expect(opensAt.secondsStep, 1);
 
       final closesAt =
           nodes.firstWhere((n) => n.name == 'closes_at') as DateComponent;
@@ -349,6 +439,62 @@ void main() {
 
       final gated = nodes.firstWhere((n) => n.name == 'gated_tag_ids');
       expect(gated.disabled, isTrue);
+    });
+
+    test('toggle_buttons, slider and the Placeholder-as-text_entry mapping '
+        'arrive from the real snapshot, not just a hand-built fixture', () {
+      // P10. Scoped to `banners`, the same reason `contact_email` above is:
+      // an unscoped search risks matching a same-named field elsewhere.
+      Iterable<SchemaComponent> flatten(Iterable<SchemaComponent> nodes) sync* {
+        for (final node in nodes) {
+          yield node;
+          if (node is LayoutComponent) yield* flatten(node.children);
+        }
+      }
+
+      final banners = panel.resource('banners')!;
+      final nodes = flatten(banners.form).toList();
+
+      final single =
+          nodes.firstWhere((n) => n.name == 'toggle_status')
+              as ToggleButtonsComponent;
+      expect(single.multiple, isFalse);
+      expect(single.options.map((o) => o.value), ['draft', 'live']);
+
+      final multiple =
+          nodes.firstWhere((n) => n.name == 'toggle_flags')
+              as ToggleButtonsComponent;
+      expect(multiple.multiple, isTrue);
+      expect(multiple.options.map((o) => o.value), ['featured', 'pinned']);
+
+      // The boolean() preset publishes int options 1/0 — no special-casing.
+      final preset =
+          nodes.firstWhere((n) => n.name == 'toggle_active')
+              as ToggleButtonsComponent;
+      expect(preset.options.map((o) => o.value), [1, 0]);
+
+      final rating =
+          nodes.firstWhere((n) => n.name == 'rating') as SliderComponent;
+      expect(rating.min, 0);
+      expect(rating.max, 10);
+      expect(rating.step, 1);
+      expect(rating.multiple, isFalse);
+      expect(rating.defaultValue, 0);
+      expect(rating.rules.numeric, isTrue);
+      expect(rating.rules.min, 0);
+      expect(rating.rules.max, 10);
+
+      final range =
+          nodes.firstWhere((n) => n.name == 'price_range') as SliderComponent;
+      expect(range.multiple, isTrue);
+      expect(range.step, 5);
+      expect(range.defaultValue, [20, 40]);
+
+      // Placeholder arrives as the existing text_entry type — parsed as an
+      // EntryComponent, carrying no rules, never degrading to unknown.
+      final note = nodes.firstWhere((n) => n.name == 'delivery_note');
+      expect(note, isA<EntryComponent>());
+      expect(note.type, 'text_entry');
     });
 
     test('the real snapshot carries a group on a grouped resource', () {

@@ -5,24 +5,26 @@ import '../data/resource_record.dart';
 import '../data/write_result.dart';
 import '../ports/filament_transport.dart';
 import '../schema/relation_descriptor.dart';
+import '../schema/resource_schema.dart' show ResourceSort;
 import 'load_status.dart';
 
 /// Owns one relation's full, paginated child rows — the screen `RelationSectionWidget`'s
 /// "See all" opens.
 ///
-/// Deliberately not `ResourceListProvider`: that type is hard-wired to
-/// `ResourceDataSource.list()` and its search/sort parameters, neither of
-/// which a relation has (`RelationDescriptor` carries no `search`/`sorts`
-/// block). Fetching goes through `ResourceDataSource.relation()` instead —
-/// the same data source, never a closure a host has to hand-wire, per that
-/// method's own docblock.
+/// A sibling to `ResourceListProvider`, not a subclass: it fetches through
+/// `ResourceDataSource.relation()` — the same data source, never a closure a
+/// host has to hand-wire, per that method's own docblock — and reads its
+/// search/sort capabilities from the [RelationDescriptor] (P11), which since
+/// P11 carries the same `search`/`sorts` blocks a resource schema does. The
+/// search/sort behaviour mirrors `ResourceListProvider.search()`/`sortBy()`
+/// exactly, including the reset to page one.
 class RelationListProvider extends ChangeNotifier {
   RelationListProvider({
     required this._source,
     required this.resourceKey,
     required this.id,
     required this.relation,
-  });
+  }) : _activeSort = relation.defaultSort;
 
   final ResourceDataSource _source;
   final String resourceKey;
@@ -40,6 +42,8 @@ class RelationListProvider extends ChangeNotifier {
   /// method's doc. Reset by every fresh fetch, never left stuck.
   bool _loadMoreFailed = false;
   int _page = 1;
+  String _searchTerm = '';
+  ResourceSort? _activeSort;
 
   /// Bumped by every fetch — same drop-stale-response guard as
   /// `ResourceListProvider._requestId`.
@@ -54,10 +58,27 @@ class RelationListProvider extends ChangeNotifier {
   bool get hasMore => _hasMore;
   bool get isLoadingMore => _isLoadingMore;
   bool get loadMoreFailed => _loadMoreFailed;
+  String get searchTerm => _searchTerm;
+  ResourceSort? get activeSort => _activeSort;
 
   Future<void> load() => _fetchFirstPage();
 
   Future<void> refresh() => _fetchFirstPage();
+
+  /// Mirrors `ResourceListProvider.search()`: stores the term and refetches
+  /// from page one. Debouncing lives in the screen, not here — the same
+  /// division that type documents.
+  Future<void> search(String term) {
+    _searchTerm = term;
+    return _fetchFirstPage();
+  }
+
+  /// Mirrors `ResourceListProvider.sortBy()`: the new key replaces the
+  /// default (or the previous pick) and the list refetches from page one.
+  Future<void> sortBy(ResourceSort sort) {
+    _activeSort = sort;
+    return _fetchFirstPage();
+  }
 
   /// The data source this provider fetches through, exposed so the relation
   /// list screen can build a row's `ResourceFormProvider` against the SAME
@@ -126,7 +147,15 @@ class RelationListProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final page = await _source.relation(resourceKey, id, relation, page: 1);
+      final page = await _source.relation(
+        resourceKey,
+        id,
+        relation,
+        page: 1,
+        search: _searchTerm,
+        sort: _activeSort?.key,
+        direction: _activeSort?.direction,
+      );
 
       if (requestId != _requestId) return;
 
@@ -172,6 +201,9 @@ class RelationListProvider extends ChangeNotifier {
         id,
         relation,
         page: _page + 1,
+        search: _searchTerm,
+        sort: _activeSort?.key,
+        direction: _activeSort?.direction,
       );
 
       if (requestId != _requestId) return;

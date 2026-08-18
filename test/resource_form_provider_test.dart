@@ -660,6 +660,76 @@ void main() {
       expect(provider.values['photo'], 'photos/new.png');
     });
 
+    test('success on a multiple field appends the returned path', () async {
+      // One upload call per file — the endpoint is unchanged — so a multiple
+      // field grows its list one path per success rather than being replaced
+      // by the path the way a single-file field is.
+      final source = FakeSource(
+        components: multiFileForm(),
+        record: const ResourceRecord(
+          id: 7,
+          attributes: {
+            'attachments': ['docs/a.pdf'],
+          },
+        ),
+        uploadResult: const UploadSuccess('docs/b.pdf'),
+      );
+      final provider = providerFor(source, recordId: 7);
+      await provider.load();
+
+      await provider.uploadFile(
+        'attachments',
+        bytes: const [1],
+        filename: 'b.pdf',
+      );
+
+      expect(provider.values['attachments'], ['docs/a.pdf', 'docs/b.pdf']);
+    });
+
+    test(
+      'success on a multiple field with no stored value starts the list',
+      () async {
+        final source = FakeSource(
+          components: multiFileForm(),
+          uploadResult: const UploadSuccess('docs/a.pdf'),
+        );
+        final provider = providerFor(source);
+        await provider.load();
+
+        await provider.uploadFile(
+          'attachments',
+          bytes: const [1],
+          filename: 'a.pdf',
+        );
+
+        expect(provider.values['attachments'], ['docs/a.pdf']);
+      },
+    );
+
+    test('a 422 on a multiple field keeps the stored list untouched', () async {
+      final source = FakeSource(
+        components: multiFileForm(),
+        record: const ResourceRecord(
+          id: 7,
+          attributes: {
+            'attachments': ['docs/a.pdf'],
+          },
+        ),
+        uploadResult: const UploadFailed('Too large.', statusCode: 422),
+      );
+      final provider = providerFor(source, recordId: 7);
+      await provider.load();
+
+      await provider.uploadFile(
+        'attachments',
+        bytes: const [1],
+        filename: 'b.pdf',
+      );
+
+      expect(provider.fieldErrors['attachments'], 'Too large.');
+      expect(provider.values['attachments'], ['docs/a.pdf']);
+    });
+
     test(
       'a success landing after dispose is dropped, not an assertion',
       () async {

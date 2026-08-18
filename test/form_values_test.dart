@@ -29,11 +29,15 @@ SchemaComponent selectField(String name, {required Object? defaultValue}) {
   }, 'test');
 }
 
-SchemaComponent fileField(String name, {bool readOnly = true}) {
+SchemaComponent fileField(
+  String name, {
+  bool readOnly = true,
+  bool multiple = false,
+}) {
   return SchemaComponent.fromJson({
     'type': 'file',
     'name': name,
-    'config': {'readOnly': readOnly},
+    'config': {'readOnly': readOnly, if (multiple) 'multiple': true},
   }, 'test');
 }
 
@@ -174,6 +178,31 @@ void main() {
       expect(values.payloadFor(components)['avatar'], 'avatars/1/photo.png');
     });
 
+    test('a writable multiple file field seeds and round-trips as a '
+        'List<String>', () {
+      // The wire value of a multiple field is a list of stored paths in
+      // every case — on a record, and again in the write body. Seeding
+      // passes the record's list straight through, and the payload sends
+      // the same list shape back; a scalar here would be a server 422, not
+      // a coercion.
+      final components = [
+        textField('name'),
+        fileField('attachments', readOnly: false, multiple: true),
+      ];
+      final values = FormValues.initial(
+        components,
+        from: const {
+          'attachments': ['docs/a.pdf', 'docs/b.pdf'],
+        },
+      );
+
+      expect(values['attachments'], ['docs/a.pdf', 'docs/b.pdf']);
+      expect(values.payloadFor(components)['attachments'], [
+        'docs/a.pdf',
+        'docs/b.pdf',
+      ]);
+    });
+
     test('omits every field nested inside a hidden container', () {
       // The container's own flag has to gate the whole subtree before
       // recursion — same as RuleExtractor::childrenOf() on the server —
@@ -286,6 +315,83 @@ void main() {
       }, 'test');
 
       expect(FormValues.initial([component])['accent'], '#ff0000');
+    });
+
+    test('seeds the new P10 types\' defaults — scalar and list alike', () {
+      // `toggle_buttons` and `slider` capture `default` like every other leaf
+      // (UnknownComponent notably does NOT — the form_values.dart note), so a
+      // create form opens with the panel author's default already in place.
+      final components = [
+        SchemaComponent.fromJson(const {
+          'type': 'toggle_buttons',
+          'name': 'status',
+          'default': 'draft',
+          'config': {'multiple': false, 'options': []},
+        }, 'test'),
+        SchemaComponent.fromJson(const {
+          'type': 'toggle_buttons',
+          'name': 'flags',
+          'default': ['featured'],
+          'config': {'multiple': true, 'options': []},
+        }, 'test'),
+        SchemaComponent.fromJson(const {
+          'type': 'slider',
+          'name': 'rating',
+          'default': 0,
+          'config': {'min': 0, 'max': 10, 'multiple': false},
+        }, 'test'),
+        SchemaComponent.fromJson(const {
+          'type': 'slider',
+          'name': 'price_range',
+          'default': [20, 40],
+          'config': {'min': 0, 'max': 100, 'multiple': true},
+        }, 'test'),
+      ];
+      final values = FormValues.initial(components);
+
+      expect(values['status'], 'draft');
+      expect(values['flags'], ['featured']);
+      expect(values['rating'], 0);
+      expect(values['price_range'], [20, 40]);
+    });
+
+    test('the new P10 types round-trip through the payload, gated like every '
+        'other field', () {
+      // Writable by default, excluded when hidden or disabled — the ordinary
+      // writableFields walk, no type-specific arm.
+      final components = [
+        SchemaComponent.fromJson(const {
+          'type': 'toggle_buttons',
+          'name': 'status',
+          'config': {'multiple': false, 'options': []},
+        }, 'test'),
+        SchemaComponent.fromJson(const {
+          'type': 'slider',
+          'name': 'price_range',
+          'config': {'min': 0, 'max': 100, 'multiple': true},
+        }, 'test'),
+        SchemaComponent.fromJson(const {
+          'type': 'slider',
+          'name': 'secret_rating',
+          'hidden': true,
+        }, 'test'),
+        SchemaComponent.fromJson(const {
+          'type': 'toggle_buttons',
+          'name': 'locked_status',
+          'disabled': true,
+        }, 'test'),
+      ];
+      final values = FormValues.initial(components)
+          .set('status', 'live')
+          .set('price_range', [10, 30])
+          .set('secret_rating', 5)
+          .set('locked_status', 'draft');
+
+      final payload = values.payloadFor(components);
+      expect(payload['status'], 'live');
+      expect(payload['price_range'], [10, 30]);
+      expect(payload.containsKey('secret_rating'), isFalse);
+      expect(payload.containsKey('locked_status'), isFalse);
     });
   });
 

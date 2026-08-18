@@ -116,6 +116,9 @@ class _RecordSource implements ResourceDataSource {
     Object id,
     RelationDescriptor relation, {
     int page = 1,
+    String? search,
+    String? sort,
+    String? direction,
   }) => throw UnimplementedError();
 
   @override

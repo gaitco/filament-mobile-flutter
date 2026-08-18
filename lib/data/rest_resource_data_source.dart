@@ -154,10 +154,21 @@ class RestResourceDataSource implements ResourceDataSource {
     Object id,
     RelationDescriptor relation, {
     int page = 1,
+    String? search,
+    String? sort,
+    String? direction,
   }) async {
+    // The same omission rule as [list]: an unknown sort key is a 422 on the
+    // relation endpoint too, and a blank search would be a search for nothing.
     final response = await _transport.get(
       '$prefix/$resourceKey/$id/relations/${relation.key}',
-      query: {'page': '$page'},
+      query: {
+        'page': '$page',
+        if (search != null && search.trim().isNotEmpty) 'search': search,
+        if (sort != null && sort.trim().isNotEmpty) 'sort': sort,
+        if (direction != null && direction.trim().isNotEmpty)
+          'direction': direction,
+      },
     );
 
     final rows = response['data'];

@@ -1,5 +1,100 @@
 # Changelog
 
+## 0.9.0 — 2026-08-18
+
+P10–P13 ship: the remaining field types, relation list search/sort,
+multi-file upload, and date/time completeness. **Breaking for external
+implementers of `ResourceDataSource`** — `relation()` gained optional
+`search`/`sort`/`direction` named parameters (P11), so an implementation
+that does not inherit the interface will not compile until it updates the
+signature. Callers are unaffected; the transport ports are untouched.
+
+- **Date/time steps are parsed, and deliberately not acted on.**
+  `DateComponent` gains `hoursStep` / `minutesStep` / `secondsStep` — absent
+  or wrong-typed reads as 1, the vendor default, the standing absence rule —
+  but the widgets ignore them: the stock Material pickers have no step grid,
+  the server enforces no step, and snapping a picked time would make mobile
+  stricter than the web panel it mirrors. The keys exist for a host rendering
+  its own picker. **No breaking changes, no new dependencies** — the package
+  still ships exactly `flutter` + `equatable`. The server's final rejections
+  stand client-side: no `disabledDates`, no `firstDayOfWeek`, bounds stay
+  hints by web parity.
+
+- **Multi-file upload renders and writes.** `FileComponent` gains
+  `multiple` (absent or wrong-typed reads as `false`, the standing absence
+  rule), `maxFiles`/`minFiles` (absent or wrong-typed reads as null), and
+  its value is a `List<String>` of stored paths when `multiple` — a scalar
+  arriving under a multiple field is tolerated on read, never coerced on
+  write. `ResourceFormProvider._uploadedValue` appends the returned path
+  for a multiple field instead of replacing, and
+  `FileFieldWidget._buildMultiple` renders the current list as filename-
+  basename rows with per-item remove plus an add button that stops being
+  offered at `maxFiles` — a hint, the repeater-cap idiom: the server's
+  array `max` is the rule. Each add tap is the single-file loop, unchanged:
+  one pick through the host's `filePicker` (still a single `PickedFile`),
+  one `uploadFile()` call, one append — the endpoint stays one file per
+  request, so a multi-file field is N uploads, assembled client-side and
+  submitted whole (wholesale-replacement; an empty list clears). All the
+  single-file fallbacks carry over: no picker or no upload-capable
+  transport and the field is read-only with the honest note, a
+  server-published `readOnly` always wins, and the in-flight guard keeps a
+  slow upload from being double-fired. The single-file path is
+  byte-identical to before.
+
+  **No breaking changes this time** — unlike the 0.8.x relation entries,
+  nothing in `lib/ports/*` moved: `FilamentTransport`,
+  `FilamentUploadTransport` and the `FilamentFilePicker`/`PickedFile`
+  typedef are untouched, and a host on `RestResourceDataSource` needs no
+  change. **No new dependencies** — the package still ships exactly
+  `flutter` + `equatable`.
+
+- **Relation lists gain search and sort.** `RelationDescriptor` now parses
+  `search` (the resource level's `ResourceSearch`, reused) and `sorts`
+  (`List<ResourceSort>`, reused), with a `defaultSort` getter — an absent or
+  wrong-typed key reads as disabled / `[]`, never a throw: a pre-P11 server
+  is indistinguishable from an undeclared relation, the standing absence
+  rule. `RelationListProvider` gains `search()`/`sortBy()` mirroring
+  `ResourceListProvider` exactly — the declared default sort is active from
+  the first fetch, and every change refetches from page one — and
+  `RelationListScreen` draws the search field and sort sheet gated on
+  `relation.search.enabled` / `relation.sorts.isNotEmpty`, nothing drawn for
+  an undeclared relation. `RelationSectionWidget` stays plain, deliberately:
+  list controls live on the full screen.
+
+  **Breaking for a host with its own `ResourceDataSource`
+  implementation:** `relation()` gained three optional named parameters
+  (`search`, `sort`, `direction`), so an external implementation will not
+  compile until it updates the signature — the same class of break 0.8.0
+  documented for the same interface. Source-compatible for callers; a host
+  on `RestResourceDataSource` needs no change, and `lib/ports/*` stays
+  untouched.
+
+- **`toggle_buttons` and `slider` render.** `ToggleButtonsComponent` and
+  `SliderComponent` join the `switch (type)` in `SchemaComponent.fromJson`,
+  rendered by `ToggleButtonsFieldWidget` — a `ChoiceChip` per option, a
+  `FilterChip` per option when `multiple` — and `SliderFieldWidget` — a
+  Material `Slider`, or a `RangeSlider` when `multiple`, with divisions from
+  the published `step`. Both widgets clamp rather than trust the payload,
+  because both Material controls assert on contradictory bounds. **No new
+  dependencies** — the package still ships exactly `flutter` + `equatable` —
+  and **no new ports**: both types travel the existing
+  `default`/`/state`/write paths. `slider` needs no slider-specific
+  validation at all: the enforced bounds already arrive as the node's
+  ordinary `rules`.
+
+- **An entry-typed node in a form renders nothing.** The server's
+  `Placeholder` publishes as `text_entry`; reaching a form it hits the field
+  registry's existing `SizedBox.shrink()` arm — entries belong to infolists.
+  That reading is now pinned.
+
+- The contract suite pins both new shapes from `contract/panel.json`,
+  including the absence readings: an absent or wrong-typed `multiple` reads
+  as `false`, absent `options` as `[]`, absent `min`/`max` as `0`/`100`, and
+  an absent `step` as no step constraint. `multiple` on a `slider` is a hint,
+  never a gate — the documented server weakness (a range slider with no array
+  default publishes `multiple: false` on `/schema`) is rendered from, never
+  enforced against.
+
 ## 0.8.2 — 2026-08-13
 
 Documentation and example only — no library code changed.

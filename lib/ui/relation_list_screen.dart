@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../data/relation_submit_target.dart';
@@ -21,8 +23,13 @@ import 'resource_form_screen.dart';
 /// (`CardListSkeleton`) and scrolled, paginated body (`PaginatedCardList`) —
 /// the endpoint serves the identical `{data, meta}` envelope — and adds only
 /// the pieces that differ: the title and the scroll-triggered `loadMore()`.
-/// No search field, no sort button: `RelationDescriptor` carries no
-/// `search`/`sorts` block, so there is nothing to build them from.
+///
+/// Search and sort (P11) mirror `ResourceListScreen`'s chrome and gating: a
+/// search field only when the descriptor's `search.enabled`, a sort menu only
+/// when its `sorts` is non-empty — an undeclared relation, or a server
+/// predating P11 (which parses as one), gets the plain list it always had.
+/// The embedded `RelationSectionWidget` stays plain either way: the full
+/// screen is where list controls live.
 ///
 /// Row writes (P9): when [childResource] is passed — the host resolves it
 /// from its already-loaded panel as `panel.resource(relation.resource)` — the
@@ -66,7 +73,10 @@ class RelationListScreen extends StatefulWidget {
 }
 
 class _RelationListScreenState extends State<RelationListScreen> {
+  static const _debounce = Duration(milliseconds: 400);
+
   final _scroll = ScrollController();
+  Timer? _searchTimer;
 
   @override
   void initState() {
@@ -82,6 +92,7 @@ class _RelationListScreenState extends State<RelationListScreen> {
 
   @override
   void dispose() {
+    _searchTimer?.cancel();
     _scroll
       ..removeListener(_onScroll)
       ..dispose();
@@ -92,6 +103,13 @@ class _RelationListScreenState extends State<RelationListScreen> {
     if (_scroll.position.pixels >= _scroll.position.maxScrollExtent * 0.8) {
       widget.provider.loadMore();
     }
+  }
+
+  /// Debouncing lives here rather than in the provider — the same division
+  /// `ResourceListScreen` documents: this is where the keystroke arrives.
+  void _onSearchChanged(String term) {
+    _searchTimer?.cancel();
+    _searchTimer = Timer(_debounce, () => widget.provider.search(term));
   }
 
   @override
@@ -105,6 +123,14 @@ class _RelationListScreenState extends State<RelationListScreen> {
         appBar: AppBar(
           title: Text(widget.provider.relation.label),
           actions: [
+            // Both gated on the descriptor's published capability, never
+            // drawn for an undeclared relation — see the class doc.
+            if (widget.provider.relation.sorts.isNotEmpty)
+              IconButton(
+                icon: const Icon(Icons.sort),
+                onPressed: _openSortSheet,
+                tooltip: widget.strings.sortTitle,
+              ),
             // Drawn ONLY on the child resource's published `create` — see the
             // class doc for why a null childResource or a false flag gets no
             // button at all rather than a disabled one.
@@ -116,6 +142,25 @@ class _RelationListScreenState extends State<RelationListScreen> {
                 onPressed: () => _openForm(),
               ),
           ],
+          bottom: widget.provider.relation.search.enabled
+              ? PreferredSize(
+                  preferredSize: const Size.fromHeight(56),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                    child: TextField(
+                      onChanged: _onSearchChanged,
+                      decoration: InputDecoration(
+                        hintText:
+                            widget.provider.relation.search.placeholder ??
+                            widget.strings.searchHint,
+                        prefixIcon: const Icon(Icons.search),
+                        isDense: true,
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                )
+              : null,
         ),
         body: ListenableBuilder(
           listenable: widget.provider,
@@ -319,5 +364,47 @@ class _RelationListScreenState extends State<RelationListScreen> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// `ResourceListScreen._openSortSheet` verbatim, one level down — same
+  /// sheet, same `Directionality` reasoning, reading the relation's sorts.
+  Future<void> _openSortSheet() async {
+    final provider = widget.provider;
+    // NOT `Directionality.of(context)`: this `State`'s own `context` is an
+    // ANCESTOR of the `Directionality` `build()` wraps around the `Scaffold`
+    // — see `textDirectionOf`'s doc. Resolved straight from the descriptor
+    // value instead, which is also the value the sheet needs to inherit
+    // anyway (`showModalBottomSheet` opens a route in the Navigator's
+    // overlay, a sibling of this screen, not a descendant of it).
+    final direction = textDirectionOf(provider.relation.direction);
+
+    final chosen = await showModalBottomSheet<ResourceSort>(
+      context: context,
+      builder: (sheetContext) => Directionality(
+        textDirection: direction,
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  widget.strings.sortTitle,
+                  style: Theme.of(sheetContext).textTheme.titleMedium,
+                ),
+              ),
+              for (final sort in provider.relation.sorts)
+                ListTile(
+                  title: Text(sort.label),
+                  selected: sort.key == provider.activeSort?.key,
+                  onTap: () => Navigator.of(sheetContext).pop(sort),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (chosen != null) await provider.sortBy(chosen);
   }
 }

@@ -125,6 +125,72 @@ void main() {
       },
     );
 
+    test('parses the P11 search and sorts blocks off the wire', () {
+      // Same shapes the resource block already publishes — reused types, not
+      // relation-specific duplicates.
+      final relation = RelationDescriptor.fromJson(const {
+        'key': 'tags',
+        'label': 'Tags',
+        'card': {
+          'title': {'field': 'name'},
+        },
+        'search': {'enabled': true, 'placeholder': 'ابحث'},
+        'sorts': [
+          {'key': 'name', 'label': 'Name', 'default': true, 'direction': 'asc'},
+          {'key': 'created_at', 'label': 'Created', 'direction': 'desc'},
+        ],
+      }, 'r');
+
+      expect(relation.search.enabled, isTrue);
+      expect(relation.search.placeholder, 'ابحث');
+      expect(relation.sorts, hasLength(2));
+      expect(relation.sorts.first.key, 'name');
+      expect(relation.sorts.first.isDefault, isTrue);
+      expect(relation.sorts.last.direction, 'desc');
+    });
+
+    test('absent search/sorts read as disabled and empty — a server '
+        'predating P11, never an error', () {
+      // The same absence rule the `relations` array itself already carries.
+      final relation = RelationDescriptor.fromJson(const {
+        'key': 'tags',
+        'label': 'Tags',
+        'card': {
+          'title': {'field': 'name'},
+        },
+      }, 'r');
+
+      expect(relation.search.enabled, isFalse);
+      expect(relation.search.placeholder, isNull);
+      expect(relation.sorts, isEmpty);
+    });
+
+    test('a wrong-typed search or sorts node throws — present but malformed '
+        'is a contract violation, not an absent key', () {
+      // object()/objects(), not opt(): the convention ResourceSchema's own
+      // `search`/`sorts` blocks already follow (see malformed_object_test).
+      for (final node in [
+        const {'search': 'nope'},
+        const {'sorts': 'nope'},
+        const {
+          'sorts': ['nope'],
+        },
+      ]) {
+        expect(
+          () => RelationDescriptor.fromJson({
+            'key': 'tags',
+            'label': 'Tags',
+            'card': {
+              'title': {'field': 'name'},
+            },
+            ...node,
+          }, 'r'),
+          throwsA(isA<SchemaFormatException>()),
+          reason: 'node: $node',
+        );
+      }
+    });
+
     test('an absent, null or wrong-typed resource key reads as read-only, '
         'never throws', () {
       // Absent: a server predating P9. Null: a server whose relation child

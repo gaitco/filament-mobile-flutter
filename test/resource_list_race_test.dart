@@ -28,6 +28,9 @@ class _GatedSource implements ResourceDataSource {
     Object id,
     RelationDescriptor relation, {
     int page = 1,
+    String? search,
+    String? sort,
+    String? direction,
   }) async => throw UnimplementedError();
 
   @override

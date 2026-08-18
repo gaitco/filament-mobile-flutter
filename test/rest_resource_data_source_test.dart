@@ -161,6 +161,59 @@ void main() {
   });
 
   test(
+    'relation() builds the same search/sort query list() builds (P11)',
+    () async {
+      const tags = RelationDescriptor(
+        key: 'tags',
+        label: 'Tags',
+        card: CardLayout.empty(),
+      );
+
+      final transport = FakeTransport({
+        '/api/mobile-panel/schema': _panelJson,
+        '/api/mobile-panel/banners/7/relations/tags': {'data': [], 'meta': {}},
+      });
+
+      await sourceFor(transport).relation(
+        'banners',
+        7,
+        tags,
+        page: 1,
+        search: 'sale',
+        sort: 'name',
+        direction: 'desc',
+      );
+
+      expect(transport.calls.last.query, {
+        'page': '1',
+        'search': 'sale',
+        'sort': 'name',
+        'direction': 'desc',
+      });
+    },
+  );
+
+  test('relation() omits absent or blank search/sort params, like list() — '
+      'an unknown sort key is a 422 server-side, never sent as null', () async {
+    const tags = RelationDescriptor(
+      key: 'tags',
+      label: 'Tags',
+      card: CardLayout.empty(),
+    );
+
+    final transport = FakeTransport({
+      '/api/mobile-panel/schema': _panelJson,
+      '/api/mobile-panel/banners/7/relations/tags': {'data': [], 'meta': {}},
+    });
+
+    await sourceFor(
+      transport,
+    ).relation('banners', 7, tags, search: '   ', sort: ' ', direction: '');
+
+    expect(transport.calls.last.query, {'page': '1'});
+  });
+
+  test(
     'relation() sends the requested page, not a hardcoded first page',
     () async {
       // Task 8 pages through this same call. A `page: 2` that reached the wire

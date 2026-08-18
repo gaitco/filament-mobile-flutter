@@ -58,6 +58,14 @@ class FieldRegistry {
         component: component,
         state: state,
       ),
+      ToggleButtonsComponent() => ToggleButtonsFieldWidget(
+        component: component,
+        state: state,
+      ),
+      SliderComponent() => SliderFieldWidget(
+        component: component,
+        state: state,
+      ),
       BooleanComponent() => BooleanFieldWidget(
         component: component,
         state: state,
@@ -116,6 +124,8 @@ class FieldRegistry {
     'select',
     'multiselect',
     'radio',
+    'toggle_buttons',
+    'slider',
     'toggle',
     'checkbox',
     'date',

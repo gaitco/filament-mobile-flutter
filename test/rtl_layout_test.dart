@@ -84,6 +84,9 @@ class _ThrowingSource implements ResourceDataSource {
     Object id,
     RelationDescriptor relation, {
     int page = 1,
+    String? search,
+    String? sort,
+    String? direction,
   }) async => const PaginatedRecords(
     records: [],
     meta: PageMeta(currentPage: 1, lastPage: 1, perPage: 20, total: 0),

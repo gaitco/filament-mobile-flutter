@@ -99,8 +99,13 @@ void main() {
 
     for (final resource in panel.resources) {
       visitForm(resource, (component) {
+        // EntryComponent is excluded: since P10 a Placeholder legitimately
+        // arrives as a `text_entry` inside a form, and an entry in a form is
+        // read-only — it renders nothing on purpose (the registry's shrink
+        // arm), it does not need a field widget.
         if (component is! LayoutComponent &&
             component is! UnknownComponent &&
+            component is! EntryComponent &&
             !renderable.contains(component.type)) {
           missing.add(component.type);
         }
@@ -270,5 +275,126 @@ void main() {
         reason: 'relation ${relation['key']} has a card with no title',
       );
     }
+  });
+
+  // P11: relation nodes always carry `search` and `sorts` — the same shapes
+  // the resource block publishes, with absent-on-old-server as the only
+  // tolerated omission. Pinned against real server output, not only the
+  // hand-written panel.json node, because that is the loop this file exists
+  // to close.
+  test('every published relation carries the P11 search and sorts keys', () {
+    final relations = <Map<String, dynamic>>[];
+    for (final resource in fixture['resources'] as List) {
+      for (final relation
+          in (resource as Map)['relations'] as List? ?? const []) {
+        relations.add(relation as Map<String, dynamic>);
+      }
+    }
+
+    expect(relations, isNotEmpty);
+
+    for (final relation in relations) {
+      expect(
+        relation['search'],
+        isA<Map>(),
+        reason: 'relation ${relation['key']} has no search key',
+      );
+      expect(
+        relation['sorts'],
+        isA<List>(),
+        reason: 'relation ${relation['key']} has no sorts key',
+      );
+    }
+
+    // The fixture's declared tags relation: search on, `name` the default
+    // sort — the values the Dart descriptor actually parses.
+    final tags = relations.singleWhere((r) => r['key'] == 'tags');
+    expect((tags['search'] as Map)['enabled'], isTrue);
+    final sorts = tags['sorts'] as List;
+    expect((sorts.single as Map)['key'], 'name');
+    expect((sorts.single as Map)['default'], isTrue);
+  });
+
+  // P12: `multiple` is always present on every `file` node a current server
+  // publishes, `false` for single — the same always-present ruling as the
+  // repeater's `readOnly` and P10's `toggle_buttons.multiple`. Pinned
+  // against real server output, not only the hand-written panel.json nodes,
+  // because that is the loop this file exists to close.
+  test('every file node in the real output publishes multiple', () {
+    final fileNodes = <Map<String, dynamic>>[];
+
+    void walk(List<dynamic> nodes) {
+      for (final node in nodes) {
+        final map = node as Map<String, dynamic>;
+        if (map['type'] == 'file') fileNodes.add(map);
+        walk(map['children'] as List? ?? const []);
+      }
+    }
+
+    for (final resource in fixture['resources'] as List) {
+      final map = resource as Map<String, dynamic>;
+      walk(map['form'] as List? ?? const []);
+      walk(map['infolist'] as List? ?? const []);
+    }
+
+    expect(fileNodes, isNotEmpty);
+
+    for (final node in fileNodes) {
+      expect(
+        (node['config'] as Map)['multiple'],
+        isA<bool>(),
+        reason: 'file node ${node['name']} has no multiple key',
+      );
+    }
+
+    // The fixture's fully-declared multiple field: the hints the Dart
+    // component actually parses, out of real server output.
+    final attachments = fileNodes.singleWhere(
+      (n) => n['name'] == 'attachments',
+    );
+    final config = attachments['config'] as Map;
+    expect(config['multiple'], isTrue);
+    expect(config['maxFiles'], 3);
+    expect(config['minFiles'], 1);
+  });
+
+  // P13: `hoursStep`/`minutesStep`/`secondsStep` publish on datetime/time
+  // nodes only when > 1 — advisory for this client (the reorderable
+  // precedent), which parses them and deliberately does not act on them.
+  // Pinned against real server output, not only the hand-written panel.json
+  // node, because that is the loop this file exists to close.
+  test('the step keys arrive from the real output', () async {
+    final panel = await RestResourceDataSource(
+      transport: GoldenTransport(),
+    ).panel();
+
+    final dates = <String?, DateComponent>{};
+    for (final resource in panel.resources) {
+      visitForm(resource, (component) {
+        if (component is DateComponent) dates[component.name] = component;
+      });
+    }
+
+    // The fixture's stepped time node: only `minutesStep` is non-default,
+    // so only it publishes.
+    final opensAt = dates['opens_at']!;
+    expect(opensAt.kind, DateKind.time);
+    expect(opensAt.hoursStep, 1);
+    expect(opensAt.minutesStep, 15);
+    expect(opensAt.secondsStep, 1);
+
+    // The fully-stepped datetime node: all three keys non-default.
+    final bookedAt = dates['booked_at']!;
+    expect(bookedAt.kind, DateKind.datetime);
+    expect(bookedAt.hoursStep, 2);
+    expect(bookedAt.minutesStep, 30);
+    expect(bookedAt.secondsStep, 15);
+
+    // A date node never carries a step — a date has no time grid.
+    final publishedOn = dates['published_on']!;
+    expect(publishedOn.kind, DateKind.date);
+    expect(publishedOn.hoursStep, 1);
+    expect(publishedOn.minutesStep, 1);
+    expect(publishedOn.secondsStep, 1);
   });
 }

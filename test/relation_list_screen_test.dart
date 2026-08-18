@@ -29,6 +29,19 @@ const _relation = RelationDescriptor(
   card: CardLayout(titleField: 'name'),
 );
 
+/// The P11 shape: search enabled, two declared sorts with a default — what
+/// the full screen (never the embedded section) draws its chrome from.
+const _searchableRelation = RelationDescriptor(
+  key: 'tags',
+  label: 'Tags',
+  card: CardLayout(titleField: 'name'),
+  search: ResourceSearch(enabled: true),
+  sorts: [
+    ResourceSort(key: 'name', label: 'Name', isDefault: true),
+    ResourceSort(key: 'created_at', label: 'Created', direction: 'desc'),
+  ],
+);
+
 /// A [ResourceDataSource] whose `relation()` serves distinct rows per page,
 /// so a pagination test actually proves paging rather than asserting against
 /// one page repeated or an empty array. Every other method throws —
@@ -56,6 +69,11 @@ class _Source implements ResourceDataSource {
 
   final List<int> requestedPages = [];
 
+  /// The search/sort params the most recent `relation()` call carried (P11).
+  String? lastSearch;
+  String? lastSort;
+  String? lastDirection;
+
   /// Which relation write fired, and the child id it carried — so a delete
   /// test asserts the ROW's key reached the endpoint, not just "a call".
   final List<String> writes = [];
@@ -67,8 +85,14 @@ class _Source implements ResourceDataSource {
     Object id,
     RelationDescriptor relation, {
     int page = 1,
+    String? search,
+    String? sort,
+    String? direction,
   }) async {
     requestedPages.add(page);
+    lastSearch = search;
+    lastSort = sort;
+    lastDirection = direction;
     if (error != null) throw error!;
     if (page == failPage) {
       throw FilamentTransportException('page $page failed', statusCode: 500);
@@ -202,6 +226,7 @@ Widget _screenFor(
   _Source source, {
   void Function(ResourceRecord)? onRecordTap,
   ResourceSchema? childResource,
+  RelationDescriptor relation = _relation,
 }) {
   return MaterialApp(
     home: RelationListScreen(
@@ -209,7 +234,7 @@ Widget _screenFor(
         source: source,
         resourceKey: 'banners',
         id: 7,
-        relation: _relation,
+        relation: relation,
       ),
       childResource: childResource,
       onRecordTap: onRecordTap,
@@ -392,6 +417,89 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tapped!.id, 1);
+  });
+
+  group('search/sort chrome (P11)', () {
+    const rows = [
+      [
+        {'id': 1, 'name': 'Sale'},
+      ],
+    ];
+
+    testWidgets('draws a search field and sort button only when the '
+        'descriptor publishes them', (tester) async {
+      // Gated exactly like ResourceListScreen: an undeclared relation — or a
+      // server predating P11, which parses as one — gets the plain list.
+      await tester.pumpWidget(_screenFor(_Source(pagesOfRows: rows)));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(TextField), findsNothing);
+      expect(find.widgetWithIcon(IconButton, Icons.sort), findsNothing);
+
+      await tester.pumpWidget(
+        _screenFor(_Source(pagesOfRows: rows), relation: _searchableRelation),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(TextField), findsOneWidget);
+      expect(find.widgetWithIcon(IconButton, Icons.sort), findsOneWidget);
+    });
+
+    testWidgets('debounces search into the provider rather than querying per '
+        'keystroke', (tester) async {
+      // Sibling to ResourceListScreen's identical test — the timer lives in
+      // the screen for the same reason.
+      final source = _Source(pagesOfRows: rows);
+
+      await tester.pumpWidget(
+        _screenFor(source, relation: _searchableRelation),
+      );
+      await tester.pumpAndSettle();
+
+      final before = source.requestedPages.length;
+
+      await tester.enterText(find.byType(TextField), 'sa');
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(
+        source.requestedPages.length,
+        before,
+        reason: 'no query before the debounce',
+      );
+
+      await tester.enterText(find.byType(TextField), 'sal');
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pumpAndSettle();
+
+      expect(source.requestedPages.length, before + 1);
+      expect(source.lastSearch, 'sal');
+      expect(source.requestedPages.last, 1);
+    });
+
+    testWidgets('picking a sort re-fetches page one with the new key', (
+      tester,
+    ) async {
+      final source = _Source(pagesOfRows: rows);
+
+      await tester.pumpWidget(
+        _screenFor(source, relation: _searchableRelation),
+      );
+      await tester.pumpAndSettle();
+
+      // The declared default is active from the very first fetch.
+      expect(source.lastSort, 'name');
+      expect(source.lastDirection, 'asc');
+
+      await tester.tap(find.widgetWithIcon(IconButton, Icons.sort));
+      await tester.pumpAndSettle();
+      expect(find.text(const FilamentStrings().sortTitle), findsOneWidget);
+
+      await tester.tap(find.text('Created'));
+      await tester.pumpAndSettle();
+
+      expect(source.lastSort, 'created_at');
+      expect(source.lastDirection, 'desc');
+      expect(source.requestedPages.last, 1);
+    });
   });
 
   group('row-write affordances (P9)', () {

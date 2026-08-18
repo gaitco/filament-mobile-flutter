@@ -42,11 +42,18 @@ abstract interface class ResourceDataSource {
   /// rows, in the same `{data, meta}` envelope [list] uses. The same read
   /// path as [list] against a sibling URL, so it is fetched the same way:
   /// through this data source, never a closure a host has to hand-wire.
+  ///
+  /// [search]/[sort]/[direction] (P11) mirror [list]'s exactly: the endpoint
+  /// answers them with the resource index's contract — an unknown sort key is
+  /// a 422, and a declared default sort applies when [sort] is absent.
   Future<PaginatedRecords> relation(
     String resourceKey,
     Object id,
     RelationDescriptor relation, {
     int page,
+    String? search,
+    String? sort,
+    String? direction,
   });
 
   /// POST /{resource}/{id}/relations/{relation} — creates one child row

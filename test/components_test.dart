@@ -74,6 +74,144 @@ void main() {
     });
   });
 
+  group('ToggleButtonsComponent', () {
+    test('parses flattened options and a scalar default', () {
+      final component = parse<ToggleButtonsComponent>(const {
+        'type': 'toggle_buttons',
+        'name': 'status',
+        'default': 'draft',
+        'rules': {'required': true},
+        'config': {
+          'multiple': false,
+          'options': [
+            {'value': 'draft', 'label': 'مسودة'},
+            {'value': 'active', 'label': 'نشط'},
+          ],
+        },
+      });
+
+      expect(component.options, hasLength(2));
+      expect(component.options.first.value, 'draft');
+      expect(component.options.first.label, 'مسودة');
+      expect(component.multiple, isFalse);
+      expect(component.defaultValue, 'draft');
+      expect(component.rules.required, isTrue);
+    });
+
+    test('parses a multiple field with a list default', () {
+      final component = parse<ToggleButtonsComponent>(const {
+        'type': 'toggle_buttons',
+        'name': 'flags',
+        'default': ['featured'],
+        'config': {
+          'multiple': true,
+          'options': [
+            {'value': 'featured', 'label': 'Featured'},
+          ],
+        },
+      });
+
+      expect(component.multiple, isTrue);
+      expect(component.defaultValue, ['featured']);
+    });
+
+    test('a boolean() preset arrives as int options', () {
+      final component = parse<ToggleButtonsComponent>(const {
+        'type': 'toggle_buttons',
+        'name': 'active',
+        'config': {
+          'multiple': false,
+          'options': [
+            {'value': 1, 'label': 'Yes'},
+            {'value': 0, 'label': 'No'},
+          ],
+        },
+      });
+
+      expect(component.options.map((o) => o.value), [1, 0]);
+    });
+
+    test('absent or wrong-typed config keys read as their defaults', () {
+      // The spec's degradation rule: absence is never an error, so a pre-P10
+      // server (or a hand-rolled one) can never blank the form here.
+      final absent = parse<ToggleButtonsComponent>(const {
+        'type': 'toggle_buttons',
+        'name': 'status',
+      });
+      expect(absent.multiple, isFalse);
+      expect(absent.options, isEmpty);
+      expect(absent.defaultValue, isNull);
+
+      final wrongTyped = parse<ToggleButtonsComponent>(const {
+        'type': 'toggle_buttons',
+        'name': 'status',
+        'config': {'multiple': 'yes'},
+      });
+      expect(wrongTyped.multiple, isFalse);
+    });
+  });
+
+  group('SliderComponent', () {
+    test('parses bounds, step and a scalar default', () {
+      final component = parse<SliderComponent>(const {
+        'type': 'slider',
+        'name': 'rating',
+        'default': 0,
+        'rules': {'required': true, 'numeric': true, 'min': 0, 'max': 10},
+        'config': {'min': 0, 'max': 10, 'step': 1, 'multiple': false},
+      });
+
+      expect(component.min, 0);
+      expect(component.max, 10);
+      expect(component.step, 1);
+      expect(component.multiple, isFalse);
+      expect(component.defaultValue, 0);
+      expect(component.rules.numeric, isTrue);
+      expect(component.rules.min, 0);
+      expect(component.rules.max, 10);
+    });
+
+    test('parses a range slider with a two-element default', () {
+      final component = parse<SliderComponent>(const {
+        'type': 'slider',
+        'name': 'price_range',
+        'default': [20, 40],
+        'config': {'min': 0, 'max': 100, 'step': 5, 'multiple': true},
+      });
+
+      expect(component.multiple, isTrue);
+      expect(component.defaultValue, [20, 40]);
+    });
+
+    test('absent bounds read as 0/100, absent step as no constraint', () {
+      // Filament's own accessor defaults (getMinValue/getMaxValue), mirrored
+      // for a server that omits the keys.
+      final component = parse<SliderComponent>(const {
+        'type': 'slider',
+        'name': 'rating',
+      });
+
+      expect(component.min, 0);
+      expect(component.max, 100);
+      expect(component.step, isNull);
+      expect(component.multiple, isFalse);
+      expect(component.defaultValue, isNull);
+    });
+
+    test('a non-numeric step reads as no step constraint, never an error', () {
+      // Filament allows a STRING step; the walker publishes `step` only when
+      // it is numeric, so a string must not be reinterpreted client-side.
+      final component = parse<SliderComponent>(const {
+        'type': 'slider',
+        'name': 'rating',
+        'config': {'step': 'any', 'multiple': 'yes'},
+      });
+
+      expect(component.step, isNull);
+      expect(component.multiple, isFalse);
+    });
+  });
+
   group('BooleanComponent', () {
     test('maps toggle and checkbox onto a kind', () {
       expect(
@@ -116,6 +254,70 @@ void main() {
       expect(
         parse<FileComponent>(const {'type': 'file', 'name': 'avatar'}).readOnly,
         isTrue,
+      );
+    });
+
+    test('parses a multiple field with its count bounds', () {
+      final component = parse<FileComponent>(const {
+        'type': 'file',
+        'name': 'attachments',
+        'config': {
+          'readOnly': false,
+          'multiple': true,
+          'accept': ['image/png', 'image/jpeg'],
+          'maxSize': 1024,
+          'maxFiles': 3,
+          'minFiles': 1,
+        },
+      });
+
+      expect(component.readOnly, isFalse);
+      expect(component.multiple, isTrue);
+      expect(component.accept, ['image/png', 'image/jpeg']);
+      expect(component.maxSizeKb, 1024);
+      expect(component.maxFiles, 3);
+      expect(component.minFiles, 1);
+    });
+
+    test('an absent multiple reads as false', () {
+      // Absent means a server predating P12 — the client must never invent a
+      // capability the server did not declare, so it reads as single.
+      expect(
+        parse<FileComponent>(const {'type': 'file', 'name': 'avatar'}).multiple,
+        isFalse,
+      );
+    });
+
+    test('absent or wrong-typed count bounds read as null', () {
+      final absent = parse<FileComponent>(const {
+        'type': 'file',
+        'name': 'attachments',
+        'config': {'multiple': true},
+      });
+      expect(absent.maxFiles, isNull);
+      expect(absent.minFiles, isNull);
+
+      // Same licence `opt` gives every scalar hint: a wrong type reads as
+      // absent rather than failing the whole field's parse.
+      final wrongTyped = parse<FileComponent>(const {
+        'type': 'file',
+        'name': 'attachments',
+        'config': {'multiple': true, 'maxFiles': 'three', 'minFiles': 1.5},
+      });
+      expect(wrongTyped.maxFiles, isNull);
+      expect(wrongTyped.minFiles, isNull);
+    });
+
+    test('a wrong-typed whole config throws', () {
+      // `object()`'s deliberate strictness, pinned for this component too:
+      // a container arriving as a scalar is a server bug, not a widening.
+      expect(
+        () => parse<FileComponent>(const {
+          'type': 'file',
+          'name': 'avatar',
+          'config': 'readOnly',
+        }),
+        throwsA(isA<SchemaFormatException>()),
       );
     });
   });
@@ -267,6 +469,48 @@ void main() {
         parse<DateComponent>(const {'type': 'date', 'name': 'd'}).seconds,
         isFalse,
       );
+    });
+
+    test('parses the three step keys when the server publishes them', () {
+      // P13. The walker publishes a step only when it is > 1, so all three
+      // present at once is the fully-declared case.
+      final component = parse<DateComponent>(const {
+        'type': 'datetime',
+        'name': 'booked_at',
+        'config': {'hoursStep': 2, 'minutesStep': 30, 'secondsStep': 15},
+      });
+
+      expect(component.hoursStep, 2);
+      expect(component.minutesStep, 30);
+      expect(component.secondsStep, 15);
+    });
+
+    test('an absent step key reads as 1, the vendor default', () {
+      // Absent means 1 — the walker leaves the key off rather than
+      // publishing the default, so "no key" must not read as "no grid".
+      final component = parse<DateComponent>(const {
+        'type': 'time',
+        'name': 'opens_at',
+        'config': {'minutesStep': 15},
+      });
+
+      expect(component.hoursStep, 1);
+      expect(component.minutesStep, 15);
+      expect(component.secondsStep, 1);
+    });
+
+    test('a wrong-typed step key reads as 1, not a crash', () {
+      // `opt`'s licence: the server may widen a scalar without breaking older
+      // clients, and an advisory hint is not worth a thrown form.
+      final component = parse<DateComponent>(const {
+        'type': 'time',
+        'name': 'opens_at',
+        'config': {'hoursStep': '2', 'minutesStep': 15.5, 'secondsStep': true},
+      });
+
+      expect(component.hoursStep, 1);
+      expect(component.minutesStep, 1);
+      expect(component.secondsStep, 1);
     });
   });
 

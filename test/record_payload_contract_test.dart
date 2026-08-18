@@ -81,8 +81,12 @@ void main() {
         'name',
       );
 
-      expect(first.id, 'Red');
-      expect(first.get<String>('name'), 'Red');
+      // Blue sorts before Red: since P11 the fixture relation declares
+      // `name` as its default sort, and the endpoint applies it when the
+      // request carries no `sort` parameter — this golden's row order IS
+      // that declared default, not insertion order.
+      expect(first.id, 'Blue');
+      expect(first.get<String>('name'), 'Blue');
     });
   });
 }

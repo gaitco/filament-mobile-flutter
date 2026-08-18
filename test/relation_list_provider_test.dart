@@ -10,6 +10,7 @@ import 'package:filament_mobile/ports/filament_transport.dart';
 import 'package:filament_mobile/schema/card_layout.dart';
 import 'package:filament_mobile/schema/panel_schema.dart';
 import 'package:filament_mobile/schema/relation_descriptor.dart';
+import 'package:filament_mobile/schema/resource_schema.dart';
 import 'package:filament_mobile/schema/schema_component.dart';
 import 'package:filament_mobile/state/load_status.dart';
 import 'package:filament_mobile/state/relation_list_provider.dart';
@@ -19,6 +20,20 @@ const _relation = RelationDescriptor(
   key: 'tags',
   label: 'Tags',
   card: CardLayout(titleField: 'name'),
+);
+
+/// The P11 shape: a relation whose server declared search and sorts — the
+/// same fixture `panel.json`'s `roles` node and `laravel-panel.json`'s `tags`
+/// node publish.
+const _searchableRelation = RelationDescriptor(
+  key: 'tags',
+  label: 'Tags',
+  card: CardLayout(titleField: 'name'),
+  search: ResourceSearch(enabled: true),
+  sorts: [
+    ResourceSort(key: 'name', label: 'Name', isDefault: true),
+    ResourceSort(key: 'created_at', label: 'Created', direction: 'desc'),
+  ],
 );
 
 /// Sibling to `resource_list_provider_test.dart`'s `_ListSource`: `relation()`
@@ -40,14 +55,26 @@ class _RelationSource implements ResourceDataSource {
 
   final List<int> pages = [];
 
+  /// The search/sort params the most recent `relation()` call carried (P11) —
+  /// the provider-facing half of the REST data source's query-string tests.
+  String? lastSearch;
+  String? lastSort;
+  String? lastDirection;
+
   @override
   Future<PaginatedRecords> relation(
     String resourceKey,
     Object id,
     RelationDescriptor relation, {
     int page = 1,
+    String? search,
+    String? sort,
+    String? direction,
   }) async {
     pages.add(page);
+    lastSearch = search;
+    lastSort = sort;
+    lastDirection = direction;
     if (error != null && failOnPage == null) throw error!;
     if (failOnPage != null && page >= failOnPage!) {
       throw error ?? Exception('boom');
@@ -178,13 +205,15 @@ class _RelationSource implements ResourceDataSource {
   }) => throw UnimplementedError();
 }
 
-RelationListProvider _providerFor(_RelationSource source) =>
-    RelationListProvider(
-      source: source,
-      resourceKey: 'banners',
-      id: 7,
-      relation: _relation,
-    );
+RelationListProvider _providerFor(
+  _RelationSource source, {
+  RelationDescriptor relation = _relation,
+}) => RelationListProvider(
+  source: source,
+  resourceKey: 'banners',
+  id: 7,
+  relation: relation,
+);
 
 void main() {
   test('load() fills records from page one', () async {
@@ -327,6 +356,63 @@ void main() {
 
     expect(source.pages.last, 1);
     expect(provider.records.map((r) => r.id), [10, 11]);
+  });
+
+  group('search/sort (P11)', () {
+    test('load() applies the declared default sort, mirroring '
+        'ResourceListProvider', () async {
+      final source = _RelationSource();
+      final provider = _providerFor(source, relation: _searchableRelation);
+
+      await provider.load();
+
+      expect(provider.activeSort!.key, 'name');
+      expect(source.lastSort, 'name');
+      expect(source.lastDirection, 'asc');
+    });
+
+    test('a relation with no declared sorts sends none', () async {
+      // The pre-P11 shape: absent sorts means no sort parameter, so the
+      // server's own defaulting — never a client-invented key — decides.
+      final source = _RelationSource();
+      final provider = _providerFor(source);
+
+      await provider.load();
+
+      expect(provider.activeSort, isNull);
+      expect(source.lastSort, isNull);
+      expect(source.lastDirection, isNull);
+    });
+
+    test('search() resets to page one and sends the term', () async {
+      final source = _RelationSource();
+      final provider = _providerFor(source, relation: _searchableRelation);
+
+      await provider.load();
+      await provider.loadMore();
+      await provider.search('sale');
+
+      expect(provider.searchTerm, 'sale');
+      expect(source.pages.last, 1);
+      expect(source.lastSearch, 'sale');
+      expect(provider.records.map((r) => r.id), [10, 11]);
+    });
+
+    test(
+      'sortBy() resets to page one and sends the new key and direction',
+      () async {
+        final source = _RelationSource();
+        final provider = _providerFor(source, relation: _searchableRelation);
+
+        await provider.load();
+        await provider.sortBy(_searchableRelation.sorts.last);
+
+        expect(provider.activeSort!.key, 'created_at');
+        expect(source.lastSort, 'created_at');
+        expect(source.lastDirection, 'desc');
+        expect(source.pages.last, 1);
+      },
+    );
   });
 
   group('row writes (P9)', () {

@@ -2,6 +2,20 @@ part of '../schema_component.dart';
 
 enum DateKind { date, datetime, time }
 
+/// `date` / `datetime` / `time`. One class, because the three differ only in
+/// which parts of a moment they carry.
+///
+/// **The step keys are advisory and nothing here acts on them.** A
+/// `datetime`/`time` node publishes `hoursStep`/`minutesStep`/`secondsStep`
+/// only when the panel configured a value > 1 — the contract states what the
+/// field was configured with, for a host rendering its own picker (the
+/// repeater `reorderable` precedent). This client parses them so a host
+/// reading the same document sees one model, but the stock Material pickers
+/// have no step grid (they derive their behaviour from the device locale,
+/// like first-day-of-week), and the server does not enforce steps either —
+/// silently snapping or rejecting a picked time would make mobile stricter
+/// than the web panel it mirrors. Nothing reading this contract should infer
+/// server-side enforcement from these keys.
 final class DateComponent extends SchemaComponent {
   DateComponent._({
     required _CommonProperties common,
@@ -9,6 +23,9 @@ final class DateComponent extends SchemaComponent {
     required this.minDate,
     required this.maxDate,
     required this.seconds,
+    required this.hoursStep,
+    required this.minutesStep,
+    required this.secondsStep,
     required this.defaultValue,
     required this.unreadableBounds,
   }) : super._common(common);
@@ -31,6 +48,12 @@ final class DateComponent extends SchemaComponent {
       minDate: minDate,
       maxDate: maxDate,
       seconds: opt<bool>(config, 'seconds') ?? false,
+      // Absent means 1, the vendor default — the walker publishes a step
+      // only when it is > 1. Wrong-typed degrades to the same default
+      // through `opt`, like any other advisory hint.
+      hoursStep: opt<int>(config, 'hoursStep') ?? 1,
+      minutesStep: opt<int>(config, 'minutesStep') ?? 1,
+      secondsStep: opt<int>(config, 'secondsStep') ?? 1,
       defaultValue: opt<String>(json, 'default'),
       // A bound that arrived and could not be read is not the same event as
       // one that was never declared — see [unreadableBounds].
@@ -132,6 +155,12 @@ final class DateComponent extends SchemaComponent {
   /// `time` value — `HH:mm:ss` against `HH:mm`, matching TimePicker's own
   /// `H:i:s`/`H:i`.
   final bool seconds;
+
+  /// The panel's picker steps, 1 when unpublished. Advisory only — see the
+  /// class doc for why the widgets deliberately ignore them.
+  final int hoursStep;
+  final int minutesStep;
+  final int secondsStep;
 
   /// Config keys (`minDate` / `maxDate`) the server sent and this build could
   /// not read. Empty in the normal case, **including** when the panel

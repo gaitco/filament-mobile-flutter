@@ -2,7 +2,7 @@ import 'package:equatable/equatable.dart';
 
 import 'card_layout.dart';
 import 'json_reader.dart';
-import 'resource_schema.dart' show PanelDirection;
+import 'resource_schema.dart' show PanelDirection, ResourceSearch, ResourceSort;
 
 /// One relation manager published for a resource: a related list of records
 /// rendered as cards, e.g. a banner's tags. Absent from the contract entirely
@@ -14,6 +14,8 @@ class RelationDescriptor extends Equatable {
     required this.card,
     this.recordKey = 'id',
     this.resource,
+    this.search = const ResourceSearch(),
+    this.sorts = const [],
     this.direction = PanelDirection.ltr,
   });
 
@@ -30,6 +32,7 @@ class RelationDescriptor extends Equatable {
     // is still reported as the missing key it is.
     final key = req<String>(json, 'key', path);
     final label = req<String>(json, 'label', path);
+    final sortNodes = objects(json, 'sorts', path);
 
     final card = CardLayout.fromJson(
       object(json, 'card', path) ?? const {},
@@ -64,6 +67,16 @@ class RelationDescriptor extends Equatable {
       // value as absent too — a client never invents a capability the server
       // did not declare.
       resource: opt<String>(json, 'resource'),
+      // Absent on a server predating P11 reads as disabled/empty — the same
+      // absence rule the `relations` array itself carries — while a present
+      // but wrong-typed node throws, the convention ResourceSchema's own
+      // `search`/`sorts` blocks already follow (object()/objects(), not opt).
+      search: ResourceSearch.fromJson(object(json, 'search', path) ?? const {}),
+      sorts: List.generate(
+        sortNodes.length,
+        (index) =>
+            ResourceSort.fromJson(sortNodes[index], '$path.sorts[$index]'),
+      ),
       direction: direction,
     );
   }
@@ -130,6 +143,28 @@ class RelationDescriptor extends Equatable {
   /// to [PanelDirection.ltr] for a directly-constructed relation (tests, and
   /// callers building one by hand).
   final PanelDirection direction;
+
+  /// The relation's published search capability (P11) — the same
+  /// [ResourceSearch] the resource block carries, reused. Disabled when the
+  /// server declares no searchable columns, or publishes no `search` key at
+  /// all (a server predating P11).
+  final ResourceSearch search;
+
+  /// The relation's declared sorts (P11) — the same [ResourceSort] shape the
+  /// resource block carries. Empty when undeclared or when the server
+  /// predates P11; the relation list screen draws no sort control then.
+  final List<ResourceSort> sorts;
+
+  /// The declared default sort, if any — same rule as
+  /// [ResourceSchema.defaultSort]. The server applies it when a request
+  /// carries no `sort` parameter; the provider sends it explicitly so the
+  /// active sort is what the menu shows as selected.
+  ResourceSort? get defaultSort {
+    for (final sort in sorts) {
+      if (sort.isDefault) return sort;
+    }
+    return null;
+  }
 
   @override
   List<Object?> get props => [key];

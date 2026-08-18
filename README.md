@@ -78,14 +78,16 @@ and link handling — is in [`example/`](example).
 | Feature | What you get |
 |---|---|
 | [Actions](#actions) | Buttons the server already authorised for this record |
-| [Upload](#upload) | Single-file upload, through an additive port your existing transport need not implement |
+| [Upload](#upload) | Single- and multi-file upload, through an additive port your existing transport need not implement |
 | [Repeater](#repeater) | Add and remove rows, validated per row |
 | [Radio](#radio) | Real radio buttons, parsed off `select`'s own model |
+| [Toggle buttons](#toggle-buttons) | Chips — one choice or many, off `select`'s option shape |
+| [Slider](#slider) | Material `Slider` / `RangeSlider`, divisions from the published step |
 | [Tags](#tags) | Chips with a remove affordance, always a `List<String>` |
 | [Key/value](#keyvalue) | Add/remove pairs, key and value cells gated independently |
 | [Colour](#colour) | A text field with a live swatch, in the panel's own format |
 | [Time and date bounds](#time-and-date-bounds) | `showTimePicker`, and the bounds a picker declares |
-| [Relations](#relations) | A child list on the record screen — writable when the server names a child resource; "See all" opens the full paginated view |
+| [Relations](#relations) | A child list on the record screen — writable when the server names a child resource; "See all" opens the full paginated view, with search and sort where the server declares them |
 | [Rich text](#rich-text) | A real document — headings, lists, quotes, emphasis, links |
 | [Schema caching](#schema-caching) | Cold start renders from cache, revalidates behind it |
 | [Dashboard](#dashboard) | Stat tiles render; charts drawn by the opt-in [`filament_mobile_charts`](https://pub.dev/packages/filament_mobile_charts) sibling, or your own builder |
@@ -101,11 +103,15 @@ weaknesses** list stating plainly what it does not do.
 Every wire type the server can publish for a **form** has a built-in widget:
 
 `text` · `textarea` · `email` · `password` · `number` · `select` ·
-`multiselect` · `radio` · `toggle` · `checkbox` · `date` · `datetime` ·
+`multiselect` · `radio` · `toggle_buttons` · `slider` · `toggle` ·
+`checkbox` · `date` · `datetime` ·
 `time` · `color` · `file` · `tags` · `keyvalue` · `repeater`
 
 Infolist entries render through `EntryRegistry`: `text_entry`,
-`badge_entry`, `boolean_entry`, `image_entry` and `rich_entry`.
+`badge_entry`, `boolean_entry`, `image_entry` and `rich_entry`. An
+entry-typed node reaching a *form* — the server's `Placeholder` publishes as
+`text_entry` — renders nothing: entries belong to infolists, and the field
+registry's fallback arm is a `SizedBox.shrink()`.
 
 A card's **badge slot bound to a boolean column** renders a `BooleanBadge`
 (`lib/ui/semantic_badge.dart`) — Filament's boolean-column idiom, a check or
@@ -260,7 +266,8 @@ under server-translated action labels until the host supplies its own.
 
 *The host supplies the transport and the picker.*
 
-A single-file `FileUpload` field is editable from the phone, through two
+A `FileUpload` field — single or `->multiple()` — is editable from the
+phone, through two
 separate host-supplied pieces — same escape-hatch shape `chartBuilder`
 already established for dashboard charts, and for the same reason: keeping
 this package's two runtime dependencies (`flutter`, `equatable`) real for
@@ -375,7 +382,7 @@ rather than crashing the form.
 tappable but cannot work, the same rule `chartUnavailable` follows for a
 missing chart renderer. **`readOnly` from the server always wins over a
 host-supplied picker**: a field the panel published `config.readOnly: true`
-for (a multi-file field, or one whose constraints closure throws
+for (one whose constraints or `multiple()` closure throws
 server-side) shows `FilamentStrings.fileFieldReadOnly` and stays inert even
 when the host wired up both pieces — the server's word is the gate, the
 picker only fills in what the server already allowed.
@@ -401,10 +408,37 @@ what the user picked, so it reaches the form's error banner instead — the
 same split `submit()` already makes between field-scoped and form-scoped
 failures.
 
+### A multiple field is N uploads, not one
+
+A `file` node with `config.multiple: true` renders as a list of rows — one
+per stored path, filename basenames, a per-item remove — plus an add
+button. Each add tap is the same pick-then-upload loop as single-file: one
+pick through the same `filePicker` (which still returns a single
+`PickedFile`), one `uploadFile()` call, then the returned path is appended
+to the field's `List<String>` value. The endpoint never sees more than one
+file per request; the list is assembled client-side and submitted whole on
+save — wholesale-replacement, so removing a row means the submitted list
+simply no longer contains that path, and submitting an empty list clears
+the column.
+
+The add button stops being offered once the list reaches `maxFiles` — a
+**hint**, the repeater-cap idiom: the server's array `max` is the rule, and
+a crafted over-count submission 422s regardless of what the widget showed.
+The same in-flight guard applies per pick, so a slow upload cannot be
+double-fired. All the single-file fallbacks carry over unchanged: no
+`filePicker` or no upload-capable transport and the field is read-only with
+the honest note, and a server-published `readOnly` always wins.
+
+A scalar arriving under a `multiple: true` field (an older server, a
+hand-written payload) is tolerated on read rather than crashing the form —
+but on write the value is always a list.
+
 ### Known weaknesses, carried from the server or inherent to the port
 
 - **Orphaned files accumulate.** A user who picks a file and abandons the
-  form leaves a stored file with no row pointing at it. This package does
+  form leaves a stored file with no row pointing at it — and a multiple
+  field makes this more frequent, not different: one abandoned form can
+  strand a whole list. This package does
   not claim or clean these up; a host that cares prunes the storage
   directory on its own schedule — see the Laravel README's Upload section.
 - **No upload progress percentage.** `FilamentUploadTransport.upload()`
@@ -415,10 +449,9 @@ failures.
   and the multipart request body hold the file whole — a very large file on
   a low-memory device can fail before the server ever sees it. The field's
   own `maxSize`, enforced server-side, is the practical bound today.
-- **Multi-file remains unusable.** A `FileUpload::multiple()` field
-  publishes `config.readOnly: true` and shows `fileFieldReadOnly`
-  permanently — this slice has nowhere on the server to save more than one
-  path per column.
+- **No reordering of a multiple field's list.** The widget renders list
+  order and offers no drag affordance — same stance as the repeater's
+  `reorderable`.
 
 ## Repeater
 
@@ -557,6 +590,61 @@ Radio section for why an over-cap radio inlines every option instead).
 - **`Radio::isInline()` is not on the wire.** Options always stack one per
   row, the treatment `RadioFieldWidget` uses unconditionally.
 
+## Toggle buttons
+
+*Chips, parsed off `select`'s own option shape — one choice, or many when
+`multiple`.*
+
+A `toggle_buttons` node parses into `ToggleButtonsComponent` — the same
+flattened `SelectOption` list a `select`/`radio` node carries, plus an
+always-present `multiple` (absent or wrong-typed reads as `false`, the
+degradation rule every other config key already follows) — and renders
+through `ToggleButtonsFieldWidget`: a `ChoiceChip` per option when
+`multiple` is false, a `FilterChip` per option when true. The value is a
+scalar or a `List` accordingly — the `select`/`multiselect` split — through
+the ordinary form-state and write paths. A node never carries
+`config.optionsUrl`, so there is no search affordance to render, and the
+widget lays out however many options arrive. `state.enabled` and the
+server's `readOnly` are both honoured.
+
+### Known weaknesses, stated now
+
+- **Per-option colors, icons, tooltips and disabled state are not on the
+  wire.** A disabled option is the server's `in:` rule to refuse, not a
+  client rendering to reproduce.
+
+## Slider
+
+*A Material `Slider`, or a `RangeSlider` when `multiple`; divisions come from
+the published `step`.*
+
+A `slider` node parses into `SliderComponent` (`min`/`max` always present —
+absent reads as `0`/`100`, Filament's own accessor defaults; `step` only when
+the server published a numeric one; `multiple` always present) and renders
+through `SliderFieldWidget`. There is **no slider-specific validation**:
+`Slider::setUp()` force-registers `numeric`/`min:`/`max:` server-side, and
+those arrive as the node's ordinary `rules`, which the client already
+pre-validates. Both Material widgets *assert* on contradictory bounds and on
+a value outside them, so the widget clamps rather than trusting the payload —
+a stored value outside the published range reads as the bound, never a crash.
+
+**`multiple` is a hint, never a gate.** The server detects range mode from
+the state being an array, and on `/schema` that means an array `->default()`
+— a range slider with no array default publishes `multiple: false` while its
+rules still say `array` (a documented server weakness, see
+`contract/README.md`'s Slider section). The widget renders from whatever the
+node currently says — `/state` can re-answer — and never blocks a submission
+on the hint; a `422` keyed to the field lands on the field as usual.
+
+### Known weaknesses, stated now
+
+- **Pips, tooltips, behavior, fillTrack, vertical, rtl, nonLinearPoints,
+  minDifference/maxDifference and decimalPlaces are not on the wire**, so the
+  phone may offer a value the web panel's own controls would not — the
+  enforced bounds are the published `rules`, which are complete.
+- **A string `step` arrives as no `step` at all** — absence means "any step",
+  so the control renders without divisions.
+
 ## Tags
 
 *Chips with a remove affordance; the value is always a `List<String>`.*
@@ -677,16 +765,30 @@ Two bound shapes parse, because the server publishes what the panel declared
 rather than normalising it: a bare `"09:00"` and a full
 `"2026-01-01 09:00:00"`.
 
+**Steps are parsed, and deliberately not acted on.** `DateComponent` reads
+`hoursStep` / `minutesStep` / `secondsStep` — absent or wrong-typed reads as
+1, the vendor default — but the widgets ignore them: the stock Material
+pickers have no step grid, the server enforces no step, and snapping or
+rejecting a picked time would make mobile stricter than the web panel it
+mirrors. The keys exist for a host rendering its own picker.
+
 ### Known weaknesses, stated now
 
-- **Bounds are hints.** The server refuses an out-of-range value only if the
-  panel declared a rule saying so.
+- **Bounds are hints — final ruling, by web parity.** The web panel does not
+  enforce `minDate`/`maxDate` server-side either, so mobile must not be
+  stricter than the panel it mirrors; the picker's clamp is the enforcement.
+  The server refuses an out-of-range value only if the panel declared a rule
+  saying so.
 - **A `seconds` field resets seconds when the time changes.** They are
   preserved when the hour and minute are untouched; a genuinely new time starts
   at `:00`, because welding a stale `:30` onto a newly picked 16:20 would be a
   time nobody chose.
-- **Step sizes and disabled dates are not published**, so the phone may offer a
-  value the web panel's own controls would not.
+- **Disabled dates and first-day-of-week are not published — final, not
+  deferred.** A `disabledDates` list is closure-evaluated at schema-build time
+  and would freeze behind the server's ETag cache, silently stale; the stock
+  Material date picker derives the first day of week from the device locale and
+  takes no parameter, so there is nothing to honour it with. Both are
+  documented rejections, not backlog.
 
 ## Relations
 
@@ -697,11 +799,12 @@ rather than normalising it: a bare `"09:00"` and a full
 `ResourceSchema.relations` (`List<RelationDescriptor>`, **always present** —
 `[]` when the server publishes none, and read the same way on an *absent*
 `relations` key: a server predating this feature) is what a resource's
-Filament relation managers become on mobile. No filters, search or
-sorting — see the Laravel README's Relations section for the full server
-picture, including why a relation manager that narrows its own query is not
-published at all. Against a current server a relation can also be
-**writable**, which is what its descriptor's `resource` key announces.
+Filament relation managers become on mobile. Filters stay out; search and
+sort are host-declared per relation on the server and arrive on the
+descriptor (below) — see the Laravel README's Relations section for the
+full server picture, including why a relation manager that narrows its own
+query is not published at all. Against a current server a relation can also
+be **writable**, which is what its descriptor's `resource` key announces.
 
 Each `RelationDescriptor` carries `key`, `label`, `card` (the same
 `CardLayout` a resource's own list card uses), `recordKey` — the
@@ -713,6 +816,14 @@ capability flag**: the server publishes it only when exactly one registered
 resource owns the related model, and the parser reads an absent, null or
 wrong-typed value as *absent* — read-only, never a throw, the same
 absence-means-unavailable rule `readOnly` already follows.
+
+Since P11 the descriptor also carries **`search`** (the resource level's
+`ResourceSearch`, reused) and **`sorts`** (`List<ResourceSort>`, reused),
+with a **`defaultSort`** getter — the same shapes `ResourceSchema` already
+parses, and the same readings: an absent or wrong-typed key means a server
+predating P11 and reads as disabled / `[]`, never a throw. A pre-P11 server
+is indistinguishable from an undeclared relation, which is exactly what the
+wire shape intends.
 
 ### The section, and where it fetches from
 
@@ -730,9 +841,20 @@ abstract interface class ResourceDataSource {
     Object id,
     RelationDescriptor relation, {
     int page = 1,
+    String? search,
+    String? sort,
+    String? direction,
   });
 }
 ```
+
+**P11 widened this signature — breaking for a host with its own
+`ResourceDataSource` implementation**, which must add the three optional
+named parameters to compile; it is source-compatible for callers, and a
+host on `RestResourceDataSource` needs no change at all. The REST
+implementation builds the query string with the same omission rule as
+`list()`: an unknown sort key is a `422` on the relation endpoint too, so
+nothing is sent that the server has not declared.
 
 **This is a member on `ResourceDataSource`, not a port, and no port gained
 one.** `lib/ports/*` (`FilamentTransport` and friends) are what a host
@@ -797,14 +919,23 @@ entirely the host's call; this package has no router opinion.
 scroll-triggered `loadMore()`) but fetches through
 `ResourceDataSource.relation()` instead of `.list()`, and owns its own
 `ResourceDataSource` directly rather than taking a host-wired closure — the
-same seam the section widget uses. `RelationListScreen` mirrors
-`ResourceListScreen`'s skeleton, scroll pagination and `PanelViewState`
-mapping, reusing the same `CardListSkeleton`/`PaginatedCardList` widgets
-both screens share — but carries **no search field and no sort button**:
-`RelationDescriptor` has neither a `search` nor a `sorts` block to build
-them from, because a relation manager's own filters, search and sort are
-not part of this slice's contract at all. The screen's title is the
-relation's own `label`.
+same seam the section widget uses. Since P11 it also mirrors
+`ResourceListProvider`'s search/sort behaviour exactly: `searchTerm` /
+`activeSort` state with `search()` / `sortBy()` methods (each refetches
+from page one — the list's own reset, not a new page), and the descriptor's
+declared `defaultSort` active from the first fetch. `RelationListScreen`
+mirrors `ResourceListScreen`'s skeleton, scroll pagination and
+`PanelViewState` mapping, reusing the same
+`CardListSkeleton`/`PaginatedCardList` widgets both screens share, and draws
+a **search field and sort sheet gated on `relation.search.enabled` /
+`relation.sorts.isNotEmpty`** — nothing drawn for an undeclared relation or
+a pre-P11 server, mirroring `ResourceListScreen`'s own gating. The screen's
+title is the relation's own `label`.
+
+**`RelationSectionWidget` — the embedded section on the record screen —
+stays plain, deliberately**: no search field, no sort control there. List
+controls live on the full screen; the section is a preview with a "See
+all".
 
 Three new `FilamentStrings`, all English-default, same rule as every other
 string in this package: `seeAll` (`'See all'`), `relationEmpty`
@@ -872,9 +1003,11 @@ better than blanking good rows behind the parent's error.
   loads once, in `initState`, and shows stale rows after an action that
   changes the relation's membership until the user leaves the screen and
   returns.
-- **The relation manager's filters, search and sorting are ignored.** The
-  list arrives in relation order, unfiltered — matching the server exactly,
-  which itself does not evaluate them.
+- **The relation manager's own filters stay ignored, and its table's
+  search/sort are never read.** Undeclared, the list arrives in relation
+  order, unfiltered — matching the server exactly, which itself never
+  introspects the manager's table. Search and sort appear only where the
+  host declares them per relation; a pre-P11 server reads as undeclared.
 - **Only the first two columns become a card**, because the server only
   derives that many. A relation whose meaning lives in its third column
   looks empty of information on the phone too.

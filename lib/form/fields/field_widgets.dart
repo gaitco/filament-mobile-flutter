@@ -251,6 +251,178 @@ class RadioFieldWidget extends StatelessWidget {
   }
 }
 
+/// `toggle_buttons`. The same flattened options `select`/`radio` carry, shown
+/// as tappable choice controls rather than behind a dropdown — a `Wrap` of
+/// chips, not a single row, because the type has no `optionsUrl` escape: an
+/// over-cap field inlines its full option list and this widget must render an
+/// arbitrarily long one. Single writes the chosen [SelectOption.value] as a
+/// scalar (tapping the selected chip clears to null, Filament's own single
+/// behaviour); multiple toggles membership and writes a `List` — the
+/// `select` vs `multiselect` split, through the same form paths.
+class ToggleButtonsFieldWidget extends StatelessWidget {
+  const ToggleButtonsFieldWidget({
+    required this.component,
+    required this.state,
+    super.key,
+  });
+
+  final ToggleButtonsComponent component;
+  final FieldState state;
+
+  @override
+  Widget build(BuildContext context) {
+    // Only read in multiple mode — in single mode the value is a scalar, and
+    // a hard cast here would take the whole form down on an ordinary value.
+    final selected = component.multiple
+        ? (state.value as List<Object?>?)?.whereType<Object>().toSet() ??
+              const <Object>{}
+        : const <Object>{};
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (component.label != null)
+          Text(
+            component.label!,
+            style: Theme.of(context).textTheme.labelMedium,
+          ),
+        Wrap(
+          spacing: 8,
+          children: [
+            for (final option in component.options)
+              if (component.multiple)
+                FilterChip(
+                  label: Text(option.label),
+                  selected: selected.contains(option.value),
+                  // The hard gate this whole file states up top: a null
+                  // onSelected is what makes the chip itself refuse the tap.
+                  onSelected: state.enabled
+                      ? (checked) {
+                          final next = Set<Object>.of(selected);
+                          if (checked) {
+                            next.add(option.value);
+                          } else {
+                            next.remove(option.value);
+                          }
+                          state.onChanged(next.toList());
+                        }
+                      : null,
+                )
+              else
+                ChoiceChip(
+                  label: Text(option.label),
+                  selected: state.value == option.value,
+                  onSelected: state.enabled
+                      ? (checked) =>
+                            state.onChanged(checked ? option.value : null)
+                      : null,
+                ),
+          ],
+        ),
+        if (state.error != null) _ErrorText(state.error!),
+      ],
+    );
+  }
+}
+
+/// `slider`. A Material [Slider] when [SliderComponent.multiple] is false, a
+/// [RangeSlider] when true — the value is a number or a two-element `List`
+/// respectively, round-tripped through the ordinary form paths. Bounds and
+/// `divisions` come from the node's config; the enforceable half of the same
+/// declaration rides the ordinary `rules` block into the shared validator,
+/// so there is no slider-specific validation here.
+///
+/// A range slider with no array default publishes `multiple: false` on
+/// /schema (the documented server weakness — `isMultiple()` reads the raw
+/// state at walk time) and /state may re-answer `true`. Nothing here treats
+/// either answer as more than a rendering hint: the control renders from the
+/// node it is given, a value shaped for the OTHER mode reads as unset rather
+/// than crashing, and a submission is never blocked on the client hint.
+class SliderFieldWidget extends StatelessWidget {
+  const SliderFieldWidget({
+    required this.component,
+    required this.state,
+    super.key,
+  });
+
+  final SliderComponent component;
+  final FieldState state;
+
+  @override
+  Widget build(BuildContext context) {
+    // Both Slider and RangeSlider *assert* on contradictory bounds — a
+    // server that sends min >= max would otherwise take the whole form down
+    // with a red screen. Same rule DateFieldWidget applies to its picker: a
+    // wrong limit is a nuisance, a crashed form is an outage.
+    final min = component.min.toDouble();
+    final max = component.max.toDouble();
+    final bounds = max > min ? (min, max) : (0.0, 100.0);
+
+    // Slider asserts divisions > 0 when non-null; a step that cannot divide
+    // the range at least once reads as no step constraint.
+    final step = component.step?.toDouble();
+    final divisions = step == null || step <= 0
+        ? null
+        : (bounds.$2 - bounds.$1) ~/ step;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (component.label != null)
+          Text(
+            component.label!,
+            style: Theme.of(context).textTheme.labelMedium,
+          ),
+        if (component.multiple)
+          RangeSlider(
+            values: _rangeValue(bounds),
+            min: bounds.$1,
+            max: bounds.$2,
+            divisions: divisions == null || divisions < 1 ? null : divisions,
+            onChanged: state.enabled
+                ? (values) => state.onChanged([values.start, values.end])
+                : null,
+          )
+        else
+          Slider(
+            value: _singleValue(bounds),
+            min: bounds.$1,
+            max: bounds.$2,
+            divisions: divisions == null || divisions < 1 ? null : divisions,
+            onChanged: state.enabled ? state.onChanged : null,
+          ),
+        if (state.error != null) _ErrorText(state.error!),
+      ],
+    );
+  }
+
+  /// Slider asserts its value lies inside [min, max]; a stored record value
+  /// can outlive a later narrowing of the bounds, so it renders clamped — the
+  /// value in FormValues itself is untouched until the user drags.
+  double _singleValue((double, double) bounds) {
+    final value = state.value;
+    if (value is! num) return bounds.$1;
+    return value.toDouble().clamp(bounds.$1, bounds.$2);
+  }
+
+  /// A scalar left over from a `multiple: false` answer (or no value at all)
+  /// reads as the whole range rather than crashing the RangeSlider's own
+  /// start <= end assert.
+  RangeValues _rangeValue((double, double) bounds) {
+    final value = state.value;
+    if (value is! List || value.length != 2) {
+      return RangeValues(bounds.$1, bounds.$2);
+    }
+    final ends = value.whereType<num>().map((v) => v.toDouble()).toList();
+    if (ends.length != 2) return RangeValues(bounds.$1, bounds.$2);
+    final start = ends[0].clamp(bounds.$1, bounds.$2);
+    final end = ends[1].clamp(bounds.$1, bounds.$2);
+    return start <= end ? RangeValues(start, end) : RangeValues(end, start);
+  }
+}
+
 /// `toggle` and `checkbox`. Same boolean value, different control.
 class BooleanFieldWidget extends StatelessWidget {
   const BooleanFieldWidget({
@@ -720,11 +892,13 @@ class _ColorFieldWidgetState extends State<ColorFieldWidget> {
 }
 
 /// `file`. Never directly typed into — [state.value] is always a stored
-/// path, never free text — so the display control is permanently read-only.
-/// The *choose* control is separate: a choose/replace button, shown only
-/// when every one of these holds, same "hard gate" rule the file atop this
-/// list documents for every other field — `state.enabled == false` disables
-/// the real control, not just its colours:
+/// path (or, when [FileComponent.multiple], a list of them), never free
+/// text — so the display control is permanently read-only. The *choose*
+/// control is separate: a choose/replace button (single) or an add button
+/// beside the stored list (multiple), shown only when every one of these
+/// holds, same "hard gate" rule the file atop this list documents for every
+/// other field — `state.enabled == false` disables the real control, not
+/// just its colours:
 ///
 ///  - the server left this field writable (`!component.readOnly`);
 ///  - `state.enabled` — a `disabled()` closure or a disabled ancestor
@@ -740,6 +914,13 @@ class _ColorFieldWidgetState extends State<ColorFieldWidget> {
 /// A merely-disabled-but-otherwise-workable field shows neither note, same
 /// as every other disabled field type: it looks inert, it does not claim a
 /// reason that isn't true.
+///
+/// The multiple variant renders one row per stored path (basename only) with
+/// a per-item remove, and its add button stops being offered at
+/// [FileComponent.maxFiles] — a hint, never a block: the server's write-time
+/// array `max` is the rule. Each pick uploads through the unchanged
+/// one-file-per-request endpoint, so a multiple field's list grows one
+/// appended path per upload call.
 class FileFieldWidget extends StatefulWidget {
   const FileFieldWidget({
     required this.component,
@@ -770,6 +951,8 @@ class _FileFieldWidgetState extends State<FileFieldWidget> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.component.multiple) return _buildMultiple(context);
+
     final strings = widget.state.strings;
     final value = widget.state.value?.toString();
 
@@ -799,6 +982,83 @@ class _FileFieldWidgetState extends State<FileFieldWidget> {
           ),
       ],
     );
+  }
+
+  /// The multiple variant: one row per stored path with a per-item remove,
+  /// and an add button that stops being offered at `maxFiles` — absent, not
+  /// disabled, the same idiom the repeater's own cap follows. The gates and
+  /// notes are the single-file path's verbatim: the server's `readOnly`
+  /// always wins, a missing picker is a host capability gap with its own
+  /// note, and a merely-disabled field shows neither.
+  Widget _buildMultiple(BuildContext context) {
+    final strings = widget.state.strings;
+    final name = widget.component.name;
+    final paths = _paths;
+    final maxFiles = widget.component.maxFiles;
+    final atCap = maxFiles != null && paths.length >= maxFiles;
+    final note = _helperText(strings);
+    final error = widget.state.error ?? _pickerError;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (widget.component.label != null)
+          Text(
+            widget.component.label!,
+            style: Theme.of(context).textTheme.labelMedium,
+          ),
+        for (var index = 0; index < paths.length; index++)
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _basename(paths[index]),
+                  key: ValueKey('file.$name.item.$index'),
+                ),
+              ),
+              // Removal needs no picker, but it rides the same gate: the
+              // fallback rule is identical to single-file — no picker, or a
+              // server `readOnly`, and the whole field is read-only with an
+              // honest note, never a control that cannot work.
+              if (_canChoose)
+                IconButton(
+                  key: ValueKey('file.$name.remove.$index'),
+                  tooltip: strings.removeItem,
+                  icon: const Icon(Icons.close),
+                  onPressed: _uploading ? null : () => _removeAt(index),
+                ),
+            ],
+          ),
+        if (note != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 8),
+            child: Text(note, style: Theme.of(context).textTheme.bodySmall),
+          ),
+        if (_canChoose && !atCap)
+          TextButton(
+            key: ValueKey('file.$name.add'),
+            onPressed: _uploading ? null : _choose,
+            child: Text(_uploading ? strings.uploading : strings.chooseFile),
+          ),
+        if (error != null) _ErrorText(error),
+      ],
+    );
+  }
+
+  /// The stored paths, read defensively — the tags precedent: a `null`
+  /// (never uploaded) and a scalar a mistaken server sent under
+  /// `multiple: true` both read as "nothing stored" rather than throwing on
+  /// a form the user can see.
+  List<String> get _paths {
+    final raw = widget.state.value;
+    return raw is List ? raw.whereType<String>().toList() : const <String>[];
+  }
+
+  /// Wholesale-replacement, same model as the tags and repeater widgets:
+  /// the new list is the whole new set, rebuilt without position [index].
+  void _removeAt(int index) {
+    widget.state.onChanged(List<String>.of(_paths)..removeAt(index));
   }
 
   /// The server's rule always wins, then the host's capability gap; a

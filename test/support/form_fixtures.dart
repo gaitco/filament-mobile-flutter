@@ -182,6 +182,9 @@ class FakeSource implements ResourceDataSource {
     Object id,
     RelationDescriptor relation, {
     int page = 1,
+    String? search,
+    String? sort,
+    String? direction,
   }) async => throw UnimplementedError();
 
   @override
@@ -232,7 +235,10 @@ class FakeSource implements ResourceDataSource {
   @override
   Future<DashboardData> dashboard() => throw UnimplementedError();
 
-  final UploadResult uploadResult;
+  /// The next upload's answer. Mutable so a test can answer a second upload
+  /// differently from the first — a multi-file field's partial failure is
+  /// exactly that sequence.
+  UploadResult uploadResult;
 
   int uploadCalls = 0;
   String? lastUploadField;
@@ -332,6 +338,28 @@ List<SchemaComponent> fileForm({
     'label': 'Photo',
     'disabled': disabled,
     'config': {'readOnly': readOnly},
+  }, 'form[0]'),
+];
+
+/// The [fileForm] twin for a `multiple: true` field — a separate fixture
+/// rather than a flag on [fileForm] so the single-file tests keep pinning
+/// the shape a pre-P12 server publishes (no `multiple` key at all). Same
+/// sharing rule: widget- and provider-level tests parse the same node.
+List<SchemaComponent> multiFileForm({
+  bool readOnly = false,
+  bool disabled = false,
+  int? maxFiles,
+}) => [
+  SchemaComponent.fromJson({
+    'type': 'file',
+    'name': 'attachments',
+    'label': 'Attachments',
+    'disabled': disabled,
+    'config': {
+      'readOnly': readOnly,
+      'multiple': true,
+      if (maxFiles != null) 'maxFiles': maxFiles,
+    },
   }, 'form[0]'),
 ];
 

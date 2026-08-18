@@ -8,6 +8,8 @@ export 'json_reader.dart' show SchemaFormatException;
 part 'components/text_component.dart';
 part 'components/number_component.dart';
 part 'components/select_component.dart';
+part 'components/toggle_buttons_component.dart';
+part 'components/slider_component.dart';
 part 'components/boolean_component.dart';
 part 'components/date_component.dart';
 part 'components/color_component.dart';
@@ -121,6 +123,8 @@ sealed class SchemaComponent extends Equatable {
       // model class serves all three; only the widget differs. See
       // RadioFieldWidget.
       'radio' => SelectComponent._fromJson(json, common, path),
+      'toggle_buttons' => ToggleButtonsComponent._fromJson(json, common, path),
+      'slider' => SliderComponent._fromJson(json, common, path),
       'toggle' || 'checkbox' => BooleanComponent._fromJson(json, common),
       // `time` shares the model — TimePicker inherits every accessor the
       // walker reads for `datetime` — but not the bound parse: see

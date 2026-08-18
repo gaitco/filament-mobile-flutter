@@ -14,17 +14,32 @@ import 'support/contract_goldens.dart';
 /// leaf field types, and a layout container is walked for its children, not
 /// asked for a widget of its own. The same file `contract_test.dart`'s
 /// `fixture()` reads, from the same relative path.
+///
+/// Entry types are excluded too: since P10 a `Placeholder` legitimately
+/// arrives as a `text_entry` node inside a **form**, and an entry in a form
+/// renders nothing on purpose (read-only, no value to write) — the registry's
+/// `_ => SizedBox.shrink()` arm, not a missing widget.
 Set<String> _writableTypesIn(String file) {
   final panel =
       jsonDecode(contractFile(file).readAsStringSync()) as Map<String, dynamic>;
   const layoutTypes = {'section', 'grid', 'tabs', 'fieldset'};
+  const entryTypes = {
+    'text_entry',
+    'badge_entry',
+    'image_entry',
+    'boolean_entry',
+    'date_entry',
+    'rich_entry',
+  };
   final types = <String>{};
 
   void walk(List<dynamic> nodes) {
     for (final raw in nodes) {
       final node = raw as Map<String, dynamic>;
       final type = node['type'] as String;
-      if (!layoutTypes.contains(type)) types.add(type);
+      if (!layoutTypes.contains(type) && !entryTypes.contains(type)) {
+        types.add(type);
+      }
       final children = node['children'] as List<dynamic>?;
       if (children != null) walk(children);
     }

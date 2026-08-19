@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.1 — 2026-08-19
 
 Packaging only — no code change, no API change. Adds `.pubignore` so the
 mirror-only `art/` and `contract/` directories stay out of the published
@@ -10,6 +10,11 @@ publishing now runs FROM that mirror on a tag, so without this the archive
 ships at 1 MB instead of 361 KB. `.pubignore` REPLACES `.gitignore` for
 publishing rather than adding to it, so it repeats that file's entries —
 dropping one would silently ship `build/` or `pubspec.lock`.
+
+Also fixes `publish.yml`, which never worked: pub does not exchange the
+GitHub OIDC token by itself, so the job blocked on an interactive browser
+OAuth prompt instead of publishing. The workflow now trades the Actions
+token for a pub.dev one and passes it as `PUB_TOKEN`.
 
 ## 0.9.0 — 2026-08-18
 

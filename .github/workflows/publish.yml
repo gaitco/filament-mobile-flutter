@@ -4,8 +4,7 @@ name: publish
 # credentials anywhere. pub.dev verifies the token against the package's
 # configured publisher (repo + this workflow filename + tag pattern), set once
 # in the package's pub.dev admin page. `dart pub publish` running inside
-# GitHub Actions picks the OIDC token up from the environment by itself when
-# `id-token: write` is granted.
+# GitHub Actions needs the token exchanged for it — see the publish step below.
 #
 # Lives inside the PACKAGE so `git archive HEAD dart/filament_mobile` carries
 # it into the public mirror (`gaitco/filament-mobile-flutter`), where Actions
@@ -28,6 +27,23 @@ jobs:
         with:
           channel: stable
       - run: flutter pub get
+      # pub does NOT exchange the OIDC token itself. With only
+      # ACTIONS_ID_TOKEN_REQUEST_* in the environment, `dart pub publish` finds
+      # no credentials and falls back to the INTERACTIVE browser OAuth flow —
+      # it prints an accounts.google.com URL and blocks on "Waiting for your
+      # authorization..." until the job is cancelled. That is exactly how
+      # v0.9.1's first attempt burned 18 minutes and published nothing. The
+      # exchange below is the missing half: trade the Actions token for a
+      # pub.dev one (audience https://pub.dev) and hand it over via PUB_TOKEN.
+      - name: Authenticate to pub.dev via OIDC
+        run: |
+          token=$(curl -sSf \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://pub.dev" \
+            | jq -r '.value')
+          echo "::add-mask::$token"
+          echo "PUB_TOKEN=$token" >> "$GITHUB_ENV"
+          dart pub token add https://pub.dev --env-var PUB_TOKEN
       # The tag/version match is enforced server-side by pub.dev's configured
       # tag pattern (v{{version}}) — a mismatched tag refuses to publish.
       - run: dart pub publish --force

@@ -1,0 +1,33 @@
+name: publish
+
+# Tag-triggered pub.dev publish via OIDC trusted publishing — no long-lived
+# credentials anywhere. pub.dev verifies the token against the package's
+# configured publisher (repo + this workflow filename + tag pattern), set once
+# in the package's pub.dev admin page. `dart pub publish` running inside
+# GitHub Actions picks the OIDC token up from the environment by itself when
+# `id-token: write` is granted.
+#
+# Lives inside the PACKAGE so `git archive HEAD dart/filament_mobile` carries
+# it into the public mirror (`gaitco/filament-mobile-flutter`), where Actions
+# minutes are free — the same note as ci.yml. The tag is pushed to the mirror
+# by scripts/release.sh after the mirror CI on main is green.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      # The tag/version match is enforced server-side by pub.dev's configured
+      # tag pattern (v{{version}}) — a mismatched tag refuses to publish.
+      - run: dart pub publish --force

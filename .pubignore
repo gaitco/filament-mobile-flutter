@@ -1,0 +1,13 @@
+# pub reads .pubignore INSTEAD of .gitignore when this file exists, so it has to
+# repeat every .gitignore entry — dropping one silently ships that file.
+.dart_tool/
+.packages
+build/
+pubspec.lock
+
+# Mirror-only. update-mirrors.sh copies these into the public mirror: contract/
+# so the mirror's own CI can run the golden tests, art/ so the README images
+# resolve. Neither belongs in the package, and publishing now runs FROM the
+# mirror (tag-triggered OIDC), which without this ships 1 MB instead of 361 KB.
+art/
+contract/

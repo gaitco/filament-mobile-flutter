@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+Packaging only — no code change, no API change. Adds `.pubignore` so the
+mirror-only `art/` and `contract/` directories stay out of the published
+archive. They exist only in the public mirror (`update-mirrors.sh` copies
+`contract/` in for the mirror's CI and `art/` for the README images), and
+publishing now runs FROM that mirror on a tag, so without this the archive
+ships at 1 MB instead of 361 KB. `.pubignore` REPLACES `.gitignore` for
+publishing rather than adding to it, so it repeats that file's entries —
+dropping one would silently ship `build/` or `pubspec.lock`.
+
 ## 0.9.0 — 2026-08-18
 
 P10–P13 ship: the remaining field types, relation list search/sort,

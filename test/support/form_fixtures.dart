@@ -25,6 +25,9 @@ import 'package:filament_mobile/state/resource_form_provider.dart';
 /// same fake, and a second hand-copied fixture would drift the moment one of
 /// them changed.
 class FakeSource implements ResourceDataSource {
+  @override
+  Future<void> reorder(String resourceKey, List<Object> ids) =>
+      throw UnimplementedError();
   FakeSource({
     required this.components,
     List<SchemaComponent>? stateResponse,
@@ -219,6 +222,7 @@ class FakeSource implements ResourceDataSource {
     String? search,
     String? sort,
     String? direction,
+    bool reorder = false,
   }) async => throw UnimplementedError();
 
   @override

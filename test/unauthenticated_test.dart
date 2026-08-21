@@ -22,6 +22,9 @@ import 'package:flutter_test/flutter_test.dart';
 /// Throws [error] from whichever read call the provider under test makes;
 /// the other methods are never exercised by these tests.
 class FakeSource implements ResourceDataSource {
+  @override
+  Future<void> reorder(String resourceKey, List<Object> ids) =>
+      throw UnimplementedError();
   FakeSource({this.error});
 
   final Object? error;
@@ -75,6 +78,7 @@ class FakeSource implements ResourceDataSource {
     String? search,
     String? sort,
     String? direction,
+    bool reorder = false,
   }) async => throw error!;
 
   @override

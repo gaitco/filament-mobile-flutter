@@ -78,6 +78,44 @@ class ResourceSort extends Equatable {
   List<Object?> get props => [key, direction];
 }
 
+/// A resource's drag-to-reorder capability (P18) — present on
+/// [ResourceSchema.reorder] if and only if the web panel's table declared a
+/// non-pivot reorder column and authorized this user for it. See
+/// `contract/README.md`'s "Reordering" section for the full server contract.
+class ReorderConfig extends Equatable {
+  const ReorderConfig({required this.column, required this.direction});
+
+  /// Parses `json['reorder']` leniently, unlike [object]/[req]: a malformed
+  /// value (wrong type entirely, or a map missing a string `column`) reads as
+  /// "this resource cannot be reordered" rather than throwing a
+  /// [SchemaFormatException] that would blank the whole resource. Dropping a
+  /// mobile-only affordance is a safe degrade; refusing to parse the rest of
+  /// the schema over it is not.
+  static ReorderConfig? fromJson(Object? value) {
+    if (value is! Map<String, dynamic>) return null;
+
+    final column = value['column'];
+    if (column is! String || column.isEmpty) return null;
+
+    // Same leniency as [ResourceSort.direction]'s `closedEnum(ifAbsent:
+    // 'asc')` — an unrecognised or missing direction defaults rather than
+    // throwing, since the server always sends both together in practice.
+    return ReorderConfig(
+      column: column,
+      direction: value['direction'] == 'desc' ? 'desc' : 'asc',
+    );
+  }
+
+  final String column;
+
+  /// `asc` or `desc` — see [ResourceSort.direction]'s doc for why this is a
+  /// closed set rather than an arbitrary string.
+  final String direction;
+
+  @override
+  List<Object?> get props => [column, direction];
+}
+
 /// One Filament resource, rendered as a list of cards plus create/edit/view
 /// pages. Construct it directly for a Dart-defined override, or via
 /// [ResourceSchema.fromJson] for the server-served schema — same class, same
@@ -99,6 +137,7 @@ class ResourceSchema extends Equatable {
     this.badge,
     this.direction = PanelDirection.ltr,
     this.locales = const [],
+    this.reorder,
   });
 
   /// [direction] is not read off [json] — a resource's direction always
@@ -159,6 +198,7 @@ class ResourceSchema extends Equatable {
       },
       direction: direction,
       locales: locales,
+      reorder: ReorderConfig.fromJson(json['reorder']),
     );
   }
 
@@ -218,6 +258,13 @@ class ResourceSchema extends Equatable {
   /// order a translatable group's chips; the chips themselves come from
   /// this resource's own `translatable` form fields.
   final List<String> locales;
+
+  /// Drag-to-reorder capability (P18) — absent (`null`) on almost every
+  /// resource, present only when the server's `/schema` response carried the
+  /// `reorder` key for this session. `ResourceListScreen` gates its reorder
+  /// toggle on this alone — see that screen's class doc for why no host hook
+  /// is needed the way `onCreateTap` needs one.
+  final ReorderConfig? reorder;
 
   ResourceSort? get defaultSort {
     for (final sort in sorts) {

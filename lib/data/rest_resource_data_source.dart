@@ -90,19 +90,24 @@ class RestResourceDataSource implements ResourceDataSource {
     String? search,
     String? sort,
     String? direction,
+    bool reorder = false,
   }) async {
     final resource = await _resource(resourceKey);
 
     // Absent parameters are omitted rather than sent as null: the server
     // rejects an unknown sort key with a 422, and an empty `search` would
-    // otherwise be a search for nothing.
+    // otherwise be a search for nothing. `reorder: true` additionally omits
+    // `sort`/`direction` outright — the server ignores them in that mode
+    // anyway, but sending them would make this client the one exception to
+    // the contract's "?reorder=1 sends no sort params".
     final response = await _transport.get(
       '$prefix/$resourceKey',
       query: {
         'page': '$page',
         if (search != null && search.trim().isNotEmpty) 'search': search,
-        if (sort != null && sort.trim().isNotEmpty) 'sort': sort,
-        if (direction != null && direction.trim().isNotEmpty)
+        if (reorder) 'reorder': '1',
+        if (!reorder && sort != null && sort.trim().isNotEmpty) 'sort': sort,
+        if (!reorder && direction != null && direction.trim().isNotEmpty)
           'direction': direction,
       },
     );
@@ -309,6 +314,20 @@ class RestResourceDataSource implements ResourceDataSource {
       return _interpret(await _transport.delete('$prefix/$resourceKey/$id'));
     } catch (e) {
       return WriteFailed(messageOf(e));
+    }
+  }
+
+  @override
+  Future<void> reorder(String resourceKey, List<Object> ids) async {
+    final response = await _transport.post('$prefix/$resourceKey/reorder', {
+      'order': ids,
+    });
+
+    // Like `state()`/`options()` and unlike the writes above: there is no
+    // data-carrying failure outcome to return, so a non-2xx throws rather
+    // than the caller mistaking a 403/404/422 for a silent no-op.
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw FilamentTransportException(_messageOf(response.body));
     }
   }
 

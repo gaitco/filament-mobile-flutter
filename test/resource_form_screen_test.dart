@@ -1,10 +1,12 @@
 import 'package:filament_mobile/data/write_result.dart';
+import 'package:filament_mobile/ports/filament_strings.dart';
 import 'package:filament_mobile/ports/filament_transport.dart';
 import 'package:filament_mobile/schema/schema_component.dart';
 import 'package:filament_mobile/ui/resource_form_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/expect_width_capped.dart';
 import 'support/form_fixtures.dart';
 import 'support/pump_until_found.dart';
 
@@ -124,6 +126,60 @@ void main() {
     expect(source.writeCalls, 1);
   });
 
+  testWidgets('a successful save shows a Saved toast and pops the route', (
+    tester,
+  ) async {
+    // The form is pushed from a list or a record; staying on a saved form
+    // with nothing left to do is the web panel's behaviour only because the
+    // web has a redirect the phone has no equivalent for. Pop + toast is that
+    // redirect: the user lands back where they came from with confirmation.
+    final source = FakeSource(components: formWith());
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: FilledButton(
+                key: const ValueKey('open'),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        ResourceFormScreen(provider: providerFor(source)),
+                  ),
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byKey(const ValueKey('open')));
+    await pumpUntilFound(tester, find.byType(TextField));
+
+    await tester.tap(find.byKey(const ValueKey('form.submit')));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ResourceFormScreen), findsNothing, reason: 'popped');
+    expect(find.text(const FilamentStrings().saved), findsOneWidget);
+  });
+
+  testWidgets('a failed save stays on the form with the banner', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      formHarness(writeResult: const WriteFailed('Server exploded')),
+    );
+    await pumpUntilFound(tester, find.byType(TextField));
+
+    await tester.tap(find.byKey(const ValueKey('form.submit')));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ResourceFormScreen), findsOneWidget);
+    expect(find.text('Server exploded'), findsOneWidget);
+    expect(find.text(const FilamentStrings().saved), findsNothing);
+  });
+
   testWidgets('a 401 loading the edit record reaches PanelUnauthenticated, '
       'not a generic failure', (tester) async {
     // Sibling to the same regression on PanelIndexScreen, ResourceListScreen
@@ -149,5 +205,119 @@ void main() {
     await pumpUntilFound(tester, find.byType(TextField));
 
     expect(tester.takeException(), isNull);
+  });
+
+  const constrained = ValueKey('resource-form-constrained-content');
+
+  testWidgets(
+    'at 1200px viewport, form content is width-constrained by default',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(formHarness(components: formWith()));
+      await pumpUntilFound(tester, find.byType(TextField));
+
+      expectWidthCapped(
+        tester,
+        find.byKey(constrained),
+        cap: 720,
+        viewportWidth: 1200,
+      );
+    },
+  );
+
+  testWidgets('at 400px viewport, form content is unconstrained by default', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(formHarness(components: formWith()));
+    await pumpUntilFound(tester, find.byType(TextField));
+
+    expect(find.byKey(constrained), findsNothing);
+    expectFullWidth(
+      tester,
+      find
+          .descendant(
+            of: find.byType(ResourceFormScreen),
+            matching: find.byType(ListView),
+          )
+          .first,
+      viewportWidth: 400,
+    );
+  });
+
+  testWidgets('explicit maxContentWidth is honored on form', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final source = FakeSource(components: formWith());
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Directionality(
+          textDirection: TextDirection.ltr,
+          child: ResourceFormScreen(
+            provider: providerFor(source),
+            maxContentWidth: 500,
+          ),
+        ),
+      ),
+    );
+    await pumpUntilFound(tester, find.byType(TextField));
+
+    // 500 < the 720 default: only an applied value can satisfy this.
+    expectWidthCapped(
+      tester,
+      find.byKey(constrained),
+      cap: 500,
+      viewportWidth: 1200,
+    );
+  });
+
+  testWidgets('onSaved replaces the pop: called, toast shown, route stays', (
+    tester,
+  ) async {
+    // The master-detail shell swaps panes instead of popping — with a
+    // callback wired, the form must leave navigation entirely to it.
+    var saved = 0;
+    final source = FakeSource(components: formWith());
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: FilledButton(
+              key: const ValueKey('open'),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => ResourceFormScreen(
+                    provider: providerFor(source),
+                    onSaved: () => saved++,
+                  ),
+                ),
+              ),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byKey(const ValueKey('open')));
+    await pumpUntilFound(tester, find.byType(TextField));
+
+    await tester.tap(find.byKey(const ValueKey('form.submit')));
+    await tester.pumpAndSettle();
+
+    expect(saved, 1);
+    expect(
+      find.byType(ResourceFormScreen),
+      findsOneWidget,
+      reason: 'not popped',
+    );
+    expect(find.text(const FilamentStrings().saved), findsOneWidget);
   });
 }

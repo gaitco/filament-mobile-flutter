@@ -19,6 +19,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'support/pump_until_found.dart';
 
 class _Source implements ResourceDataSource {
+  @override
+  Future<void> reorder(String resourceKey, List<Object> ids) =>
+      throw UnimplementedError();
   _Source({this.resources = const [], this.groups = const {}, this.error});
 
   final List<String> resources;
@@ -89,6 +92,7 @@ class _Source implements ResourceDataSource {
     String? search,
     String? sort,
     String? direction,
+    bool reorder = false,
   }) async => throw UnimplementedError();
 
   @override

@@ -83,7 +83,7 @@ final RegExp _groupedDigits = RegExp('(?<!\\w)\\+?$_digit+(?:[ -]$_digit+)+');
 /// The correct narrow fix (walk the string, skip existing LRI…PDI spans
 /// verbatim, isolate only the text between them) is real extra code for a
 /// shape that doesn't occur at any of this package's five call sites
-/// (`entry_widgets`, `semantic_badge`, `resource_card`, `rich_entry_tile`,
+/// (`entry_widgets`, `semantic_badge`, `card_fields`, `rich_entry_tile`,
 /// `dashboard_screen`) — each isolates one field's fresh raw string exactly
 /// once, never a concatenation of previously-isolated and fresh text. Revisit if a caller
 /// ever does that concatenation.

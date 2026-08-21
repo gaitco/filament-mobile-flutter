@@ -1,8 +1,8 @@
 part of '../schema_component.dart';
 
-enum EntryKind { text, badge, image, boolean, date, rich }
+enum EntryKind { text, badge, image, boolean, date, rich, tags }
 
-/// A read-only infolist entry. All five kinds display one field, so they share
+/// A read-only infolist entry. Every kind displays one field, so they share
 /// one class; the extra slots are per-kind and null elsewhere.
 final class EntryComponent extends SchemaComponent {
   EntryComponent._({
@@ -30,6 +30,7 @@ final class EntryComponent extends SchemaComponent {
         'boolean_entry' => EntryKind.boolean,
         'date_entry' => EntryKind.date,
         'rich_entry' => EntryKind.rich,
+        'tags_entry' => EntryKind.tags,
         _ => EntryKind.text,
       },
       colors: stringMap(config, 'colors'),

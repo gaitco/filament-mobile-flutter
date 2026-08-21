@@ -19,6 +19,9 @@ import 'package:flutter_test/flutter_test.dart';
 /// Hands back a [Completer] per call so a test can land responses out of the
 /// order they were requested — the whole point of the sequencing guard.
 class _GatedSource implements ResourceDataSource {
+  @override
+  Future<void> reorder(String resourceKey, List<Object> ids) =>
+      throw UnimplementedError();
   final List<Completer<PaginatedRecords>> pending = [];
   final List<({int page, String? search})> calls = [];
 
@@ -65,6 +68,7 @@ class _GatedSource implements ResourceDataSource {
     String? search,
     String? sort,
     String? direction,
+    bool reorder = false,
   }) {
     calls.add((page: page, search: search));
     final completer = Completer<PaginatedRecords>();

@@ -24,6 +24,9 @@ import 'package:flutter_test/flutter_test.dart';
 /// field and a method sharing a name on the same class. The constructor still
 /// accepts a `record:` argument for a call site that reads naturally.
 class FakeSource implements ResourceDataSource {
+  @override
+  Future<void> reorder(String resourceKey, List<Object> ids) =>
+      throw UnimplementedError();
   FakeSource({required ResourceRecord record, this.error})
     : nextRecord = record;
 
@@ -85,6 +88,7 @@ class FakeSource implements ResourceDataSource {
     String? search,
     String? sort,
     String? direction,
+    bool reorder = false,
   }) async => throw UnimplementedError();
 
   @override

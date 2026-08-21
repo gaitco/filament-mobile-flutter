@@ -15,7 +15,8 @@ class FakeTransport implements FilamentTransport {
   /// Keyed `'<METHOD> <path>'`, e.g. `'POST /api/mobile-panel/banners'`.
   final Map<String, FilamentResponse> _writes;
 
-  final List<({String path, Map<String, dynamic>? query})> calls = [];
+  final List<({String path, Map<String, dynamic>? query, Object? body})> calls =
+      [];
 
   Object? errorToThrow;
 
@@ -24,7 +25,7 @@ class FakeTransport implements FilamentTransport {
     String path, {
     Map<String, dynamic>? query,
   }) async {
-    calls.add((path: path, query: query));
+    calls.add((path: path, query: query, body: null));
 
     if (errorToThrow != null) throw errorToThrow!;
 
@@ -37,17 +38,24 @@ class FakeTransport implements FilamentTransport {
 
   @override
   Future<FilamentResponse> post(String path, Map<String, dynamic> body) =>
-      _write('POST', path);
+      _write('POST', path, body);
 
   @override
   Future<FilamentResponse> put(String path, Map<String, dynamic> body) =>
-      _write('PUT', path);
+      _write('PUT', path, body);
 
   @override
-  Future<FilamentResponse> delete(String path) => _write('DELETE', path);
+  Future<FilamentResponse> delete(String path) => _write('DELETE', path, null);
 
-  Future<FilamentResponse> _write(String method, String path) async {
-    calls.add((path: path, query: null));
+  /// [body] is captured on [calls] (P18) so a test can assert exactly what a
+  /// write sent — e.g. `reorder()`'s `{"order": ids}` — not just that some
+  /// request hit the path.
+  Future<FilamentResponse> _write(
+    String method,
+    String path,
+    Map<String, dynamic>? body,
+  ) async {
+    calls.add((path: path, query: null, body: body));
 
     if (errorToThrow != null) throw errorToThrow!;
 

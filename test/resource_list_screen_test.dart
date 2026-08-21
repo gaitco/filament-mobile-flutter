@@ -14,11 +14,15 @@ import 'package:filament_mobile/schema/schema_component.dart';
 import 'package:filament_mobile/state/resource_list_provider.dart';
 import 'package:filament_mobile/ui/resource_card.dart';
 import 'package:filament_mobile/ui/resource_list_screen.dart';
+import 'package:filament_mobile/ui/resource_row.dart';
 import 'package:flutter/material.dart';
 import 'package:filament_mobile/data/options_page.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _Source implements ResourceDataSource {
+  @override
+  Future<void> reorder(String resourceKey, List<Object> ids) =>
+      throw UnimplementedError();
   _Source({this.error, this.rows = 2, this.pages = 1, this.failPage});
 
   final Object? error;
@@ -82,6 +86,7 @@ class _Source implements ResourceDataSource {
     String? search,
     String? sort,
     String? direction,
+    bool reorder = false,
   }) async {
     listCalls++;
     lastSearch = search;
@@ -185,13 +190,30 @@ ResourceSchema get _resource => ResourceSchema.fromJson(const {
   ],
 }, 'r');
 
-Widget screenFor(_Source source, {void Function(ResourceRecord)? onRecordTap}) {
+Widget screenFor(
+  _Source source, {
+  void Function(ResourceRecord)? onRecordTap,
+  ListRowStyle? rowStyle,
+}) {
   return MaterialApp(
     home: ResourceListScreen(
       provider: ResourceListProvider(source: source, resource: _resource),
       onRecordTap: onRecordTap,
+      rowStyle: rowStyle,
     ),
   );
+}
+
+/// Pins a phone-sized viewport for the tests that describe the card shape.
+///
+/// The binding's own 800x600 default is `medium`, which renders rows since
+/// P23's default flipped — so a test that means "a card per record" has to
+/// say which width it means rather than inherit one. Tests left unpinned
+/// exercise the row shape at 800, which is the real default there now.
+void usePhone(WidgetTester tester) {
+  tester.view.physicalSize = const Size(400, 800);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
 }
 
 void main() {
@@ -215,6 +237,7 @@ void main() {
   testWidgets('a provider that already loaded is not reloaded on mount', (
     tester,
   ) async {
+    usePhone(tester);
     final source = _Source();
     final provider = ResourceListProvider(source: source, resource: _resource);
     await provider.load();
@@ -230,6 +253,7 @@ void main() {
   });
 
   testWidgets('shows a card per record after loading', (tester) async {
+    usePhone(tester);
     await tester.pumpWidget(screenFor(_Source()));
     await tester.pumpAndSettle();
 
@@ -240,6 +264,7 @@ void main() {
   testWidgets('shows a skeleton while loading, matching the card shape', (
     tester,
   ) async {
+    usePhone(tester);
     await tester.pumpWidget(screenFor(_Source()));
     await tester.pump();
 
@@ -335,6 +360,7 @@ void main() {
   });
 
   testWidgets('taps a card and reports the record', (tester) async {
+    usePhone(tester);
     ResourceRecord? tapped;
 
     await tester.pumpWidget(
@@ -407,6 +433,7 @@ void main() {
   testWidgets('offers a retry when the next page fails, keeping page one', (
     tester,
   ) async {
+    usePhone(tester);
     // The affordance `PaginatedCardList` added, asserted through THIS
     // screen — the widget's own test proves it renders when told to, not
     // that this screen tells it to.
@@ -430,6 +457,7 @@ void main() {
   });
 
   testWidgets('renders in RTL without overflow', (tester) async {
+    usePhone(tester);
     await tester.pumpWidget(
       MaterialApp(
         home: Directionality(
@@ -447,5 +475,72 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.byType(ResourceCard), findsNWidgets(2));
+  });
+
+  group('adaptive layout (P23) — ListRowStyle', () {
+    testWidgets('at 400 wide (compact) the list still uses cards', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(400, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(screenFor(_Source()));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ResourceCard), findsNWidgets(2));
+      expect(find.byType(ResourceRow), findsNothing);
+      expect(find.byType(ResourceRowHeader), findsNothing);
+    });
+
+    testWidgets('at 1200 wide (expanded) the list uses rows with a header', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(screenFor(_Source()));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ResourceRow), findsNWidgets(2));
+      expect(find.byType(ResourceRowHeader), findsOneWidget);
+      expect(find.byType(ResourceCard), findsNothing);
+    });
+
+    testWidgets('rowStyle: ListRowStyle.card forces cards even at 1200 wide', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        screenFor(_Source(), rowStyle: ListRowStyle.card),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ResourceCard), findsNWidgets(2));
+      expect(find.byType(ResourceRow), findsNothing);
+    });
+
+    testWidgets('a row tap at 1200 wide still reports the record', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      ResourceRecord? tapped;
+      await tester.pumpWidget(
+        screenFor(_Source(), onRecordTap: (record) => tapped = record),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(ResourceRow).first);
+      await tester.pumpAndSettle();
+
+      expect(tapped!.id, 0);
+    });
   });
 }

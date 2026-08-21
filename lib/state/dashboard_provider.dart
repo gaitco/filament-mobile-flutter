@@ -38,6 +38,17 @@ class DashboardProvider extends ChangeNotifier {
       _data = await _source.dashboard();
       _status = LoadStatus.success;
     } catch (e) {
+      // A 404 here is "this panel serves no dashboard" — a read-only host
+      // (gait/nova-mobile's first slice) or a panel with the dashboard
+      // disabled — and an empty dashboard is what the screen should show,
+      // not an error with a Retry that can never succeed. Only 404: a 401
+      // is still the session, anything else is still a failure.
+      if (e is FilamentTransportException && e.statusCode == 404) {
+        _data = const DashboardData();
+        _status = LoadStatus.success;
+        notifyListeners();
+        return;
+      }
       if (e is FilamentTransportException && e.statusCode == 401) {
         _isUnauthenticated = true;
       }

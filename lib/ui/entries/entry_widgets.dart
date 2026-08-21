@@ -130,6 +130,34 @@ class BadgeEntryTile extends StatelessWidget {
   }
 }
 
+/// A `tags_entry` — a Spatie tags field's read-only detail-screen twin.
+/// Chips, the same look [TagsFieldWidget] (`lib/form/fields/field_widgets.dart`)
+/// draws for the writable field, minus the delete affordance: no
+/// `onDeleted` at all, which is what "absent, not disabled" means for a
+/// `Chip` — the same rule that widget's own docblock states.
+///
+/// [EntryRegistry] hands this only a non-empty list: a null or empty record
+/// value renders through the ordinary [EntryTile] null path instead, so this
+/// widget need not repeat that branch.
+class TagsEntryTile extends StatelessWidget {
+  const TagsEntryTile({required this.tags, this.label, super.key});
+
+  final String? label;
+  final List<String> tags;
+
+  @override
+  Widget build(BuildContext context) {
+    return Labelled(
+      label: label,
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        children: [for (final tag in tags) Chip(label: Text(tag))],
+      ),
+    );
+  }
+}
+
 /// A layout component's children under its heading. Every layout kind renders
 /// the same way on a phone — a grid's columns collapse to one — so `kind` and
 /// `columns` are carried by the schema but unused until a tablet renderer wants

@@ -107,6 +107,12 @@ class ResourceFormProvider extends ChangeNotifier {
 
   LoadStatus get status => _status;
   bool get submitting => _submitting;
+
+  /// The saved record's key as the server echoed it back, after the last
+  /// successful [submit]; null before one, or when the response carried no
+  /// record. `PanelShell` selects a just-created record with it (P23).
+  Object? get savedRecordId => _savedRecordId;
+  Object? _savedRecordId;
   List<SchemaComponent> get components => _components;
   FormValues get values => _values;
   Map<String, String> get fieldErrors => _fieldErrors;
@@ -346,7 +352,8 @@ class ResourceFormProvider extends ChangeNotifier {
     _submitting = false;
 
     switch (result) {
-      case WriteSuccess():
+      case WriteSuccess(:final data):
+        _savedRecordId = data[resource.recordKey];
         _notify();
         return true;
       case WriteInvalid(:final errors):

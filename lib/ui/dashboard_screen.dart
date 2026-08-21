@@ -6,6 +6,7 @@ import '../ports/panel_view_state.dart';
 import '../schema/resource_schema.dart' show PanelDirection;
 import '../state/dashboard_provider.dart';
 import 'bidi_text.dart';
+import 'layout.dart';
 import 'material_panel_state_builder.dart';
 import 'stat_sparkline.dart';
 
@@ -45,6 +46,7 @@ class DashboardScreen extends StatefulWidget {
     this.onStatTap,
     this.stateBuilder,
     this.strings = const FilamentStrings(),
+    this.maxContentWidth,
     super.key,
   });
 
@@ -60,6 +62,10 @@ class DashboardScreen extends StatefulWidget {
 
   final PanelBodyBuilder? stateBuilder;
   final FilamentStrings strings;
+
+  /// Maximum width for the dashboard content. Null uses a default based on the
+  /// current layout (1200 when not compact, unconstrained when compact).
+  final double? maxContentWidth;
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -86,12 +92,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
       listenable: widget.provider,
       builder: (context, _) => withPanelDirection(
         widget.provider.data?.direction ?? PanelDirection.ltr,
-        builder(context, _state()),
+        builder(context, _state(context)),
       ),
     );
   }
 
-  PanelViewState _state() {
+  PanelViewState _state(BuildContext context) {
     final provider = widget.provider;
 
     // A reload with data already on screen keeps showing that data — a
@@ -123,24 +129,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
       return PanelEmpty(message: widget.strings.dashboardEmpty);
     }
 
-    return PanelData(content: _list(widgets));
+    return PanelData(content: _list(context, widgets));
   }
 
-  Widget _list(List<DashboardWidgetData> widgets) {
+  Widget _list(BuildContext context, List<DashboardWidgetData> widgets) {
+    final listView = ListView(
+      padding: const EdgeInsets.all(8),
+      children: [
+        for (final entry in widgets)
+          switch (entry) {
+            StatsWidgetData() => _statsCard(entry),
+            ChartWidgetData() => _chartCard(entry),
+          },
+      ],
+    );
+
+    final maxWidth =
+        widget.maxContentWidth ??
+        (FilamentLayout.isCompact(context) ? null : 1200.0);
+
+    final child = maxWidth == null
+        ? listView
+        : Center(
+            child: ConstrainedBox(
+              key: const ValueKey('dashboard-constrained-content'),
+              constraints: BoxConstraints(maxWidth: maxWidth),
+              child: listView,
+            ),
+          );
+
     return RefreshIndicator(
       // Values are live — see `ResourceDataSource.dashboard()` — so a pull
       // re-reads rather than replaying a cached document.
       onRefresh: widget.provider.load,
-      child: ListView(
-        padding: const EdgeInsets.all(8),
-        children: [
-          for (final entry in widgets)
-            switch (entry) {
-              StatsWidgetData() => _statsCard(entry),
-              ChartWidgetData() => _chartCard(entry),
-            },
-        ],
-      ),
+      child: child,
     );
   }
 

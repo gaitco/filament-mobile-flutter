@@ -41,6 +41,9 @@ const _searchableRelation = RelationDescriptor(
 /// than repeating page one, and records the page argument each call actually
 /// carried.
 class _RelationSource implements ResourceDataSource {
+  @override
+  Future<void> reorder(String resourceKey, List<Object> ids) =>
+      throw UnimplementedError();
   _RelationSource({
     this.error,
     this.failOnPage,
@@ -148,6 +151,7 @@ class _RelationSource implements ResourceDataSource {
     String? search,
     String? sort,
     String? direction,
+    bool reorder = false,
   }) => throw UnimplementedError();
 
   @override

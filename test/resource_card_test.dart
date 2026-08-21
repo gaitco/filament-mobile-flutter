@@ -110,7 +110,10 @@ void main() {
     await tester.pumpWidget(wrap(ResourceCard(layout: layout, record: record)));
 
     final avatar = tester.widget<CircleAvatar>(find.byType(CircleAvatar));
-    expect((avatar.backgroundImage as NetworkImage).url, 'https://x/t.jpg');
+    expect((avatar.foregroundImage as NetworkImage).url, 'https://x/t.jpg');
+    // Behind the photo, not instead of it: a foreground image that fails to
+    // load uncovers the initial rather than leaving a blank disc.
+    expect((avatar.child as Text?)?.data, 'T');
   });
 
   testWidgets(

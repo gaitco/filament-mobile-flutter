@@ -156,7 +156,11 @@ sealed class SchemaComponent extends Equatable {
       'image_entry' ||
       'boolean_entry' ||
       'date_entry' ||
-      'rich_entry' => EntryComponent._fromJson(json, common, path),
+      'rich_entry' ||
+      // Spatie's read-only tags entry. Same `List<String>` wire shape the
+      // `tags` field's value already has — see `EntryRegistry`'s
+      // `EntryKind.tags` branch, which reads it straight off the record.
+      'tags_entry' => EntryComponent._fromJson(json, common, path),
       _ => UnknownComponent._fromJson(json, common, path, depth),
     };
   }

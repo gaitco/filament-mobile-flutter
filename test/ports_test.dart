@@ -232,6 +232,7 @@ void main() {
         'fieldColor': (strings.fieldColor, defaults.fieldColor),
         'save': (strings.save, defaults.save),
         'saveFailed': (strings.saveFailed, defaults.saveFailed),
+        'saved': (strings.saved, defaults.saved),
         'deleteConfirmTitle': (
           strings.deleteConfirmTitle,
           defaults.deleteConfirmTitle,
@@ -272,6 +273,19 @@ void main() {
           strings.keepTypingToNarrowList,
           defaults.keepTypingToNarrowList,
         ),
+        'reorderRecords': (strings.reorderRecords, defaults.reorderRecords),
+        'doneReordering': (strings.doneReordering, defaults.doneReordering),
+        'reorderFailed': (strings.reorderFailed, defaults.reorderFailed),
+        'cancelReordering': (
+          strings.cancelReordering,
+          defaults.cancelReordering,
+        ),
+        'noRecordSelected': (
+          strings.noRecordSelected,
+          defaults.noRecordSelected,
+        ),
+        'dashboardTitle': (strings.dashboardTitle, defaults.dashboardTitle),
+        'logOut': (strings.logOut, defaults.logOut),
       };
       for (final entry in plain.entries) {
         expect(

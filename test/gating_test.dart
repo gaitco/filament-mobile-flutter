@@ -23,6 +23,9 @@ import 'support/pump_until_found.dart';
 /// suite only cares about which affordances render, not what the data looks
 /// like.
 class _Source implements ResourceDataSource {
+  @override
+  Future<void> reorder(String resourceKey, List<Object> ids) =>
+      throw UnimplementedError();
   _Source({this.recordPermissions = const {}});
 
   final Map<String, dynamic> recordPermissions;
@@ -70,6 +73,7 @@ class _Source implements ResourceDataSource {
     String? search,
     String? sort,
     String? direction,
+    bool reorder = false,
   }) async => PaginatedRecords(
     records: [
       ResourceRecord.fromJson(const {'id': 1, 'name': 'صف'}, 'id'),

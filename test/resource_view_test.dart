@@ -18,6 +18,7 @@ import 'package:flutter/material.dart';
 import 'package:filament_mobile/data/options_page.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/expect_width_capped.dart';
 import 'support/pump_until_found.dart';
 
 /// The resource-level block says delete is permitted — capability. The record
@@ -25,6 +26,9 @@ import 'support/pump_until_found.dart';
 /// the distinction: [recordPermissions] here and `resourcePermissions` in
 /// [viewHarness] vary independently.
 class FakeSource implements ResourceDataSource {
+  @override
+  Future<void> reorder(String resourceKey, List<Object> ids) =>
+      throw UnimplementedError();
   FakeSource({
     this.error,
     this.recordPermissions = const {},
@@ -100,6 +104,7 @@ class FakeSource implements ResourceDataSource {
     String? search,
     String? sort,
     String? direction,
+    bool reorder = false,
   }) async => throw UnimplementedError();
 
   @override
@@ -769,6 +774,77 @@ void main() {
 
       expect(tester.takeException(), isNull);
       expect(find.text('أحمد'), findsOneWidget);
+    });
+
+    const constrained = ValueKey('resource-view-constrained-content');
+
+    testWidgets('at 1200px viewport, content is width-constrained by default', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(viewHarness());
+      await pumpUntilFound(tester, find.text('أحمد'));
+
+      expectWidthCapped(
+        tester,
+        find.byKey(constrained),
+        cap: 720,
+        viewportWidth: 1200,
+      );
+    });
+
+    testWidgets('at 400px viewport, content is unconstrained by default', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(400, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(viewHarness());
+      await pumpUntilFound(tester, find.text('أحمد'));
+
+      expect(find.byKey(constrained), findsNothing);
+      expectFullWidth(
+        tester,
+        find
+            .descendant(
+              of: find.byType(ResourceViewScreen),
+              matching: find.byType(ListView),
+            )
+            .first,
+        viewportWidth: 400,
+      );
+    });
+
+    testWidgets('explicit maxContentWidth is honored', (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ResourceViewScreen(
+            provider: ResourceViewProvider(
+              source: FakeSource(),
+              resource: _resourceWith(const {'delete': true}),
+              id: 1,
+            ),
+            maxContentWidth: 500,
+          ),
+        ),
+      );
+      await pumpUntilFound(tester, find.text('أحمد'));
+
+      // 500 < the 720 default: only an applied value can satisfy this.
+      expectWidthCapped(
+        tester,
+        find.byKey(constrained),
+        cap: 500,
+        viewportWidth: 1200,
+      );
     });
   });
 

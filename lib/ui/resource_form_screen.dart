@@ -7,6 +7,7 @@ import '../ports/filament_strings.dart';
 import '../ports/panel_view_state.dart';
 import '../schema/schema_component.dart';
 import '../state/resource_form_provider.dart';
+import 'layout.dart';
 import 'material_panel_state_builder.dart';
 
 /// One resource's create/edit form.
@@ -21,6 +22,8 @@ class ResourceFormScreen extends StatefulWidget {
     this.stateBuilder,
     this.strings = const FilamentStrings(),
     this.filePicker,
+    this.maxContentWidth,
+    this.onSaved,
     super.key,
   });
 
@@ -29,11 +32,20 @@ class ResourceFormScreen extends StatefulWidget {
   final PanelBodyBuilder? stateBuilder;
   final FilamentStrings strings;
 
+  /// Called after a successful save INSTEAD of popping the route (the toast
+  /// still shows). `PanelShell`'s detail pane wires this to swap back to the
+  /// view; absent, the form pops as it always has (P23).
+  final VoidCallback? onSaved;
+
   /// Lets the host wire in whatever file-picker plugin it uses. Null keeps
   /// every file field read-only and rendering
   /// [FilamentStrings.filePickerUnavailable] — see [FilamentFilePicker]'s doc
   /// for why that beats a control the host cannot actually drive.
   final FilamentFilePicker? filePicker;
+
+  /// Maximum width for the form content. Null uses a default based on the
+  /// current layout (720 when not compact, unconstrained when compact).
+  final double? maxContentWidth;
 
   @override
   State<ResourceFormScreen> createState() => _ResourceFormScreenState();
@@ -98,7 +110,7 @@ class _ResourceFormScreenState extends State<ResourceFormScreen> {
   Widget _form(BuildContext context) {
     final provider = widget.provider;
 
-    return ListView(
+    final listView = ListView(
       padding: const EdgeInsets.all(12),
       children: [
         if (provider.formError != null) _banner(context, provider.formError!),
@@ -110,7 +122,7 @@ class _ResourceFormScreenState extends State<ResourceFormScreen> {
           // already refuses a re-entrant call, but a control that still
           // *looks* tappable while a write is in flight invites exactly the
           // double-tap this guards against.
-          onPressed: provider.submitting ? null : () => provider.submit(),
+          onPressed: provider.submitting ? null : () => _submit(context),
           child: provider.submitting
               ? const SizedBox(
                   width: 16,
@@ -120,6 +132,20 @@ class _ResourceFormScreenState extends State<ResourceFormScreen> {
               : Text(widget.strings.save),
         ),
       ],
+    );
+
+    final maxWidth =
+        widget.maxContentWidth ??
+        (FilamentLayout.isCompact(context) ? null : 720.0);
+
+    if (maxWidth == null) return listView;
+
+    return Center(
+      child: ConstrainedBox(
+        key: const ValueKey('resource-form-constrained-content'),
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: listView,
+      ),
     );
   }
 
@@ -142,6 +168,29 @@ class _ResourceFormScreenState extends State<ResourceFormScreen> {
   /// head-of-name are siblings in the same form/section/grid the server
   /// declared them in, so the pre-pass below only ever looks within one
   /// recursive call, never across a container boundary.
+  /// Save, then leave: the web panel redirects after a successful write and
+  /// the phone's equivalent is popping back to wherever the form was pushed
+  /// from, with a toast as the confirmation the redirect target would have
+  /// shown. The toast goes through the ROOT messenger so it survives the pop
+  /// (the form's own Scaffold is gone by the time it would render). A failed
+  /// save stays put — the banner and field errors are the whole point of
+  /// staying. A form that is not inside a Navigator (a host embedding it)
+  /// still saves; it just has nowhere to go.
+  Future<void> _submit(BuildContext context) async {
+    final saved = await widget.provider.submit();
+    if (!saved || !context.mounted) return;
+
+    ScaffoldMessenger.maybeOf(
+      context,
+    )?.showSnackBar(SnackBar(content: Text(widget.strings.saved)));
+    if (widget.onSaved case final onSaved?) {
+      onSaved();
+      return;
+    }
+    final navigator = Navigator.maybeOf(context);
+    if (navigator != null && navigator.canPop()) navigator.pop();
+  }
+
   List<Widget> _buildSiblings(
     BuildContext context,
     List<SchemaComponent> components,

@@ -16,6 +16,9 @@ import 'package:filament_mobile/data/options_page.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _ListSource implements ResourceDataSource {
+  @override
+  Future<void> reorder(String resourceKey, List<Object> ids) =>
+      throw UnimplementedError();
   _ListSource({this.error, this.failOnPage});
 
   final Object? error;
@@ -69,6 +72,7 @@ class _ListSource implements ResourceDataSource {
     String? search,
     String? sort,
     String? direction,
+    bool reorder = false,
   }) async {
     calls.add((page: page, search: search, sort: sort, direction: direction));
     if (error != null && failOnPage == null) throw error!;

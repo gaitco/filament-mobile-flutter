@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased
+
+- **P23: adaptive layout for wide screens.** `FilamentBreakpoints`
+  (compact < 600dp, medium 600–839dp, expanded ≥ 840dp — Material 3's window
+  size classes) and `FilamentLayout.of(context)` give every screen the
+  active form factor. `ResourceListScreen` gains a `row` style (a header row
+  plus dense table-style rows, `ListRowStyle`, the default on anything wider
+  than a phone) and a `selectedRecordId` to
+  highlight the record showing in an adjacent detail pane, plus an
+  always-visible scrollbar on a non-compact viewport; the detail, form, and
+  dashboard screens cap their content width by default, overridable per
+  screen (`maxContentWidth`).
+  `ResourceFormScreen` also gains an `onSaved` callback, fired after a
+  successful save instead of only popping the route, for a host that keeps
+  the form in place (a detail pane) rather than pushing it. A row sheds its
+  date column under 560dp and its badges under 300dp rather than clipping a
+  chip mid-word — header included, so the two never drift — the rail labels
+  every destination, and a leading avatar whose image URL fails uncovers the
+  record's initial instead of a blank disc. New:
+  `PanelShell` — one widget that assembles all of the above into a
+  drawer (compact) / `NavigationRail` (medium) / sidebar + master-list +
+  detail pane (expanded) shell, with a nested `Navigator` per pane so
+  relation flows and edits push inside whichever pane they belong to, and
+  arrow-key/Enter/Esc navigation of the master list in expanded layout. The
+  example app now runs entirely on `PanelShell`.
+
+- **P18: drag-to-reorder.** When a resource's schema carries `reorder`, the
+  list screen gains a reorder toggle: the full list loads in reorder order,
+  rows get a leading drag handle (RTL-aware), search stays live, Done saves
+  the new order once with rollback on failure, and a close button abandons
+  it. `ResourceSchema.reorder` (`ReorderConfig`), `list(reorder: true)`, and
+  `reorder(key, ids)` on the data source; three new `FilamentStrings`
+  (English + Arabic).
+
+- A `404` on `/dashboard` is an empty dashboard, not an error. A panel may
+  serve no dashboard at all — a read-only host such as `gait/nova-mobile`'s
+  first slice, or a panel with the dashboard disabled — and an empty screen
+  is the truthful state, where the old error offered a Retry that could never
+  succeed. `401` and every other status behave exactly as before.
+
 ## 0.9.2 — 2026-08-21
 
 - **P17: translatable fields render as one field with locale chips,

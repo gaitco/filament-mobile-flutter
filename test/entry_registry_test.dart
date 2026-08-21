@@ -310,6 +310,131 @@ void main() {
     expect(tile.url, 'https://x/raw.jpg');
   });
 
+  group(
+    'tags_entry — the Spatie tags entry\'s read-only detail-screen twin',
+    () {
+      testWidgets('renders one chip per tag, in order', (tester) async {
+        final record = ResourceRecord.fromJson(const {
+          'id': 1,
+          'tags': ['red', 'blue', 'green'],
+        }, 'id');
+
+        await tester.pumpWidget(
+          host(
+            Builder(
+              builder: (context) => EntryRegistry.defaults().build(
+                context,
+                parse(const {
+                  'type': 'tags_entry',
+                  'name': 'tags',
+                  'label': 'Tags',
+                }),
+                record,
+              ),
+            ),
+          ),
+        );
+
+        expect(find.text('Tags'), findsOneWidget);
+        expect(find.byType(Chip), findsNWidgets(3));
+        expect(find.text('red'), findsOneWidget);
+        expect(find.text('blue'), findsOneWidget);
+        expect(find.text('green'), findsOneWidget);
+        // Read-only: no delete affordance on any chip.
+        expect(find.byIcon(Icons.close), findsNothing);
+      });
+
+      testWidgets('stringifies non-string elements, same as toString()', (
+        tester,
+      ) async {
+        final record = ResourceRecord.fromJson(const {
+          'id': 1,
+          'counts': [1, 2],
+        }, 'id');
+
+        await tester.pumpWidget(
+          host(
+            Builder(
+              builder: (context) => EntryRegistry.defaults().build(
+                context,
+                parse(const {'type': 'tags_entry', 'name': 'counts'}),
+                record,
+              ),
+            ),
+          ),
+        );
+
+        expect(find.text('1'), findsOneWidget);
+        expect(find.text('2'), findsOneWidget);
+      });
+
+      testWidgets(
+        'an empty list gets the same empty treatment as text_entry\'s '
+        'null value',
+        (tester) async {
+          final record = ResourceRecord.fromJson(const {
+            'id': 1,
+            'tags': <Object?>[],
+          }, 'id');
+
+          await tester.pumpWidget(
+            host(
+              Builder(
+                builder: (context) => EntryRegistry.defaults().build(
+                  context,
+                  parse(const {'type': 'tags_entry', 'name': 'tags'}),
+                  record,
+                ),
+              ),
+            ),
+          );
+
+          expect(find.text('—'), findsOneWidget);
+          expect(find.byType(Chip), findsNothing);
+        },
+      );
+
+      testWidgets('a null value gets the same empty treatment', (tester) async {
+        await tester.pumpWidget(
+          host(
+            Builder(
+              builder: (context) => EntryRegistry.defaults().build(
+                context,
+                parse(const {'type': 'tags_entry', 'name': 'missing'}),
+                _record,
+              ),
+            ),
+          ),
+        );
+
+        expect(find.text('—'), findsOneWidget);
+        expect(find.byType(Chip), findsNothing);
+      });
+
+      testWidgets('a non-list value falls back to plain text', (tester) async {
+        final record = ResourceRecord.fromJson(const {
+          'id': 1,
+          'tags': 'not-a-list',
+        }, 'id');
+
+        await tester.pumpWidget(
+          host(
+            Builder(
+              builder: (context) => EntryRegistry.defaults().build(
+                context,
+                parse(const {'type': 'tags_entry', 'name': 'tags'}),
+                record,
+              ),
+            ),
+          ),
+        );
+
+        expect(find.text('not-a-list'), findsOneWidget);
+        expect(find.byType(Chip), findsNothing);
+      });
+    },
+  );
+
   // Fix round 1, finding 2: `badge_entry` renders through `BadgeEntryTile` →
   // `SemanticBadge`, a fourth render seam the original pass missed —
   // `text_entry`'s value got isolated under RTL and `badge_entry`'s didn't,

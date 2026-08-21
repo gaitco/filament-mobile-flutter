@@ -48,6 +48,7 @@ import 'package:filament_mobile/ui/relation_list_screen.dart';
 import 'package:filament_mobile/ui/resource_card.dart';
 import 'package:filament_mobile/ui/resource_form_screen.dart';
 import 'package:filament_mobile/ui/resource_list_screen.dart';
+import 'package:filament_mobile/ui/resource_row.dart';
 import 'package:filament_mobile/ui/resource_view_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -61,6 +62,9 @@ import 'support/pump_until_found.dart';
 /// five screens under test need one.
 class _ThrowingSource implements ResourceDataSource {
   @override
+  Future<void> reorder(String resourceKey, List<Object> ids) =>
+      throw UnimplementedError();
+  @override
   Future<PanelSchema> panel() async => throw UnimplementedError();
   @override
   Future<PanelSchema?> cachedPanel() async => null;
@@ -71,6 +75,7 @@ class _ThrowingSource implements ResourceDataSource {
     String? search,
     String? sort,
     String? direction,
+    bool reorder = false,
   }) async => const PaginatedRecords(
     records: [],
     meta: PageMeta(currentPage: 1, lastPage: 1, perPage: 20, total: 0),
@@ -1353,9 +1358,172 @@ void main() {
       },
     );
   });
+
+  group('TagsEntryTile — the tags_entry chip wrap under both directions', () {
+    // `Wrap` lays its children out reading-order-aware on its own — no
+    // direction-unsafe `EdgeInsets.only(left:)`/fixed `Alignment` for this
+    // widget to get wrong the way the repeater's remove button or the rich
+    // blockquote's indent did — so this is a no-overflow sanity check, not a
+    // geometry-flip assertion: a genuinely constrained row of chips must not
+    // throw in either direction.
+    testWidgets('wraps a long tag list within a narrow width, RTL and LTR '
+        'alike, with no overflow exception', (tester) async {
+      Future<void> pump(TextDirection direction) => tester.pumpWidget(
+        MaterialApp(
+          home: Directionality(
+            textDirection: direction,
+            child: Scaffold(
+              body: SizedBox(
+                width: 200,
+                child: TagsEntryTile(
+                  label: 'Tags',
+                  tags: const [
+                    'alpha',
+                    'beta',
+                    'gamma',
+                    'delta',
+                    'epsilon',
+                    'zeta',
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await pump(TextDirection.ltr);
+      expect(tester.takeException(), isNull);
+      expect(find.byType(Chip), findsNWidgets(6));
+
+      await pump(TextDirection.rtl);
+      expect(tester.takeException(), isNull);
+      expect(find.byType(Chip), findsNWidgets(6));
+    });
+  });
+
+  group('ResourceListScreen reorder mode — the drag handle sits on the '
+      'leading edge (P18)', () {
+    Future<double> handleLeftEdge(
+      WidgetTester tester,
+      PanelDirection direction,
+    ) async {
+      final provider = ResourceListProvider(
+        source: _ReorderableSource(),
+        resource: ResourceSchema(
+          key: 'slides',
+          labels: const ResourceLabels(singular: 'Slide', plural: 'Slides'),
+          reorder: const ReorderConfig(column: 'position', direction: 'asc'),
+          direction: direction,
+        ),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          key: ValueKey(direction),
+          home: ResourceListScreen(provider: provider),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('resource.reorder.toggle')));
+      await tester.pumpAndSettle();
+
+      return tester.getTopLeft(find.byIcon(Icons.drag_handle).first).dx;
+    }
+
+    testWidgets(
+      'LTR keeps the handle on the left, matching a full-width row\'s '
+      'leading edge',
+      (tester) async {
+        final ltr = await handleLeftEdge(tester, PanelDirection.ltr);
+
+        expect(ltr, lessThan(400));
+      },
+    );
+
+    testWidgets(
+      'RTL moves the handle to the right — the leading edge under RTL — not '
+      'left, unconditionally, which is where the LTR row already puts it',
+      (tester) async {
+        final ltr = await handleLeftEdge(tester, PanelDirection.ltr);
+        final rtl = await handleLeftEdge(tester, PanelDirection.rtl);
+
+        expect(
+          rtl,
+          greaterThan(ltr + 300),
+          reason:
+              'the handle must move to the right side of the 800px test '
+              'surface under RTL — a hardcoded EdgeInsets.only(left:) would '
+              'leave it stuck on the left in both directions',
+        );
+      },
+    );
+  });
+
+  group('ResourceListScreen row style (P23) — RTL at the expanded form '
+      'factor', () {
+    testWidgets(
+      'the leading image sits on the RIGHT under RTL, with no overflow',
+      (tester) async {
+        tester.view.physicalSize = const Size(1200, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+
+        final provider = ResourceListProvider(
+          source: _ReorderableSource(),
+          resource: ResourceSchema(
+            key: 'slides',
+            labels: const ResourceLabels(singular: 'Slide', plural: 'Slides'),
+            direction: PanelDirection.rtl,
+            card: const CardLayout(
+              titleField: 'name',
+              leading: CardLeading(type: 'image', field: 'avatar'),
+            ),
+          ),
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(home: ResourceListScreen(provider: provider)),
+        );
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+
+        final row = find.byType(ResourceRow).first;
+        final rowLeft = tester.getTopLeft(row).dx;
+        final rowRight = tester.getTopRight(row).dx;
+        final avatarLeft = tester
+            .getTopLeft(find.byType(CircleAvatar).first)
+            .dx;
+
+        expect(avatarLeft, greaterThan((rowLeft + rowRight) / 2));
+      },
+    );
+  });
 }
 
 void _noop(Object? value) {}
+
+/// A [ResourceDataSource] whose `list()` alone answers, with two records —
+/// enough for `ResourceListScreen`'s reorder mode (P18) to render real drag
+/// handles. Every other method throws, same shape as `_ThrowingSource`.
+class _ReorderableSource extends _ThrowingSource {
+  @override
+  Future<PaginatedRecords> list(
+    String resourceKey, {
+    int page = 1,
+    String? search,
+    String? sort,
+    String? direction,
+    bool reorder = false,
+  }) async => const PaginatedRecords(
+    records: [
+      ResourceRecord(id: 1, attributes: {'name': 'Slide 1'}),
+      ResourceRecord(id: 2, attributes: {'name': 'Slide 2'}),
+    ],
+    meta: PageMeta(currentPage: 1, lastPage: 1, perPage: 2, total: 2),
+  );
+}
 
 /// A [ResourceDataSource] whose `record()` alone answers, with one record
 /// the current user may delete — the only two things the delete-dialog

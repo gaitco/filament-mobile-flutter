@@ -27,12 +27,19 @@ abstract interface class ResourceDataSource {
   Future<PanelSchema?> cachedPanel();
 
   /// GET /{resource}
+  ///
+  /// [reorder]: true switches to the full, unpaginated, reorder-ordered list
+  /// — `?reorder=1` — and [sort]/[direction] are omitted from the request
+  /// entirely, mirroring the server's own contract (P18): reorder mode
+  /// discards the sort column outright, the same way Filament's own
+  /// reorder-mode table does. [search] still applies in this mode.
   Future<PaginatedRecords> list(
     String resourceKey, {
     int page,
     String? search,
     String? sort,
     String? direction,
+    bool reorder,
   });
 
   /// GET /{resource}/{id} — the only call that returns per-record permissions.
@@ -99,6 +106,16 @@ abstract interface class ResourceDataSource {
 
   /// DELETE /{resource}/{id} — never throws on a 4xx; see [WriteResult].
   Future<WriteResult> destroy(String resourceKey, Object id);
+
+  /// POST /{resource}/reorder — commits a full drag-to-reorder (P18), in the
+  /// records' new top-to-bottom order. [ids] are route keys
+  /// (`ResourceRecord.id`), first entry first — see
+  /// `ResourceListProvider.saveReorder()`, the only caller.
+  ///
+  /// Unlike the writes above, there is no data-carrying failure outcome to
+  /// return — same contract as [state]/[options] — so a non-2xx throws
+  /// `FilamentTransportException` rather than degrading into a silent no-op.
+  Future<void> reorder(String resourceKey, List<Object> ids);
 
   /// POST /{resource}/{id}/actions/{action} — runs one of the record's own
   /// [RecordAction]s. Never throws on a 4xx or 5xx; see [ActionResult].

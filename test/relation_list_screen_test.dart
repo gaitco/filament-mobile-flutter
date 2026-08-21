@@ -47,6 +47,9 @@ const _searchableRelation = RelationDescriptor(
 /// one page repeated or an empty array. Every other method throws —
 /// `RelationListScreen` never touches them.
 class _Source implements ResourceDataSource {
+  @override
+  Future<void> reorder(String resourceKey, List<Object> ids) =>
+      throw UnimplementedError();
   _Source({
     this.pagesOfRows = const [],
     this.error,
@@ -169,6 +172,7 @@ class _Source implements ResourceDataSource {
     String? search,
     String? sort,
     String? direction,
+    bool reorder = false,
   }) => throw UnimplementedError();
 
   @override

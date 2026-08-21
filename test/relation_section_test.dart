@@ -78,6 +78,9 @@ const _resource = ResourceSchema(
 /// hold/complete pair parks a load mid-flight so a test can observe the
 /// `loading` notification on its own, before the `success` one lands.
 class _RecordSource implements ResourceDataSource {
+  @override
+  Future<void> reorder(String resourceKey, List<Object> ids) =>
+      throw UnimplementedError();
   Completer<ResourceRecord>? _held;
 
   void holdNextRecord() => _held = Completer<ResourceRecord>();
@@ -108,6 +111,7 @@ class _RecordSource implements ResourceDataSource {
     String? search,
     String? sort,
     String? direction,
+    bool reorder = false,
   }) => throw UnimplementedError();
 
   @override

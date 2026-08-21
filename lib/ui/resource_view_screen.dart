@@ -11,6 +11,7 @@ import '../schema/relation_descriptor.dart';
 import '../schema/schema_component.dart';
 import '../state/resource_view_provider.dart';
 import 'entry_registry.dart';
+import 'layout.dart';
 import 'material_panel_state_builder.dart';
 import 'relation_section_widget.dart';
 import 'semantic_badge.dart';
@@ -27,6 +28,7 @@ class ResourceViewScreen extends StatefulWidget {
     this.strings = const FilamentStrings(),
     this.onEditTap,
     this.onSeeAllTap,
+    this.maxContentWidth,
     super.key,
   });
 
@@ -45,6 +47,10 @@ class ResourceViewScreen extends StatefulWidget {
   /// widget's doc. Task 8 builds the screen this opens.
   final void Function(RelationDescriptor relation, Object recordId)?
   onSeeAllTap;
+
+  /// Maximum width for the content area. Null uses a default based on the
+  /// current layout (720 when not compact, unconstrained when compact).
+  final double? maxContentWidth;
 
   @override
   State<ResourceViewScreen> createState() => _ResourceViewScreenState();
@@ -135,7 +141,7 @@ class _ResourceViewScreenState extends State<ResourceViewScreen> {
       (component is LayoutComponent ? blocks : loose).add(built);
     }
 
-    return ListView(
+    final listView = ListView(
       padding: const EdgeInsets.all(12),
       children: [
         if (loose.isNotEmpty)
@@ -152,6 +158,20 @@ class _ResourceViewScreenState extends State<ResourceViewScreen> {
         ...blocks,
         ..._relationSections(record),
       ],
+    );
+
+    final maxWidth =
+        widget.maxContentWidth ??
+        (FilamentLayout.isCompact(context) ? null : 720.0);
+
+    if (maxWidth == null) return listView;
+
+    return Center(
+      child: ConstrainedBox(
+        key: const ValueKey('resource-view-constrained-content'),
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: listView,
+      ),
     );
   }
 

@@ -90,6 +90,7 @@ class EntryRegistry {
         colors: component.colors,
       ),
       EntryKind.rich => _richEntry(component, value, record),
+      EntryKind.tags => _tagsEntry(component, value),
       EntryKind.text || EntryKind.date => EntryTile(
         label: component.label,
         value: value?.toString(),
@@ -171,6 +172,30 @@ class EntryRegistry {
       document: RichDocument.fromJson(richJson, '$name.__rich'),
       onLinkTap: onLinkTap,
     );
+  }
+
+  /// `EntryKind.tags` reads the record value straight off the path, the same
+  /// way every non-media/rich kind does — no flat sibling, unlike
+  /// `EntryKind.image`/`EntryKind.rich`, because a Spatie tags entry's value
+  /// already travels as the same `List<String>` the writable `tags` field's
+  /// does (`RecordSerializer::withTagPaths()`), nothing to nest and unwrap.
+  /// A null or empty list, and a value that arrived as something other than
+  /// a list (an older server, a crafted response), both fall back to the
+  /// ordinary text treatment rather than rendering an empty or broken chip
+  /// row.
+  Widget _tagsEntry(EntryComponent component, Object? value) {
+    if (value is List && value.isNotEmpty) {
+      return TagsEntryTile(
+        label: component.label,
+        tags: [for (final tag in value) tag.toString()],
+      );
+    }
+
+    if (value == null || value is List) {
+      return EntryTile(label: component.label, value: null);
+    }
+
+    return EntryTile(label: component.label, value: value.toString());
   }
 
   /// A type this build cannot render. Visible in debug so a developer sees it

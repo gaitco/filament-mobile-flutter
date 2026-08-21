@@ -19,9 +19,13 @@ import 'package:filament_mobile/ui/stat_sparkline.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/expect_width_capped.dart';
 import 'support/pump_until_found.dart';
 
 class FakeSource implements ResourceDataSource {
+  @override
+  Future<void> reorder(String resourceKey, List<Object> ids) =>
+      throw UnimplementedError();
   FakeSource({this.dashboardData, this.error});
 
   final DashboardData? dashboardData;
@@ -89,6 +93,7 @@ class FakeSource implements ResourceDataSource {
     String? search,
     String? sort,
     String? direction,
+    bool reorder = false,
   }) async => throw UnimplementedError();
 
   @override
@@ -475,5 +480,115 @@ void main() {
         expect(find.text('Orders'), findsOneWidget);
       },
     );
+
+    testWidgets(
+      'at 1600px viewport, dashboard content is width-constrained by default',
+      (tester) async {
+        tester.view.physicalSize = const Size(1600, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+
+        final source = FakeSource(
+          dashboardData: DashboardData.fromJson(const {
+            'widgets': [
+              {
+                'type': 'stats',
+                'stats': [
+                  {'label': 'Orders', 'value': '1340'},
+                ],
+              },
+            ],
+          }),
+        );
+        await tester.pumpWidget(dashboardHarness(source: source));
+        await pumpUntilFound(tester, find.text('Orders'));
+
+        expectWidthCapped(
+          tester,
+          find.byKey(const ValueKey('dashboard-constrained-content')),
+          cap: 1200,
+          viewportWidth: 1600,
+        );
+      },
+    );
+
+    testWidgets(
+      'at 400px viewport, dashboard content is unconstrained by default',
+      (tester) async {
+        tester.view.physicalSize = const Size(400, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+
+        final source = FakeSource(
+          dashboardData: DashboardData.fromJson(const {
+            'widgets': [
+              {
+                'type': 'stats',
+                'stats': [
+                  {'label': 'Orders', 'value': '1340'},
+                ],
+              },
+            ],
+          }),
+        );
+        await tester.pumpWidget(dashboardHarness(source: source));
+        await pumpUntilFound(tester, find.text('Orders'));
+
+        expect(
+          find.byKey(const ValueKey('dashboard-constrained-content')),
+          findsNothing,
+        );
+        expectFullWidth(
+          tester,
+          find
+              .descendant(
+                of: find.byType(DashboardScreen),
+                matching: find.byType(ListView),
+              )
+              .first,
+          viewportWidth: 400,
+        );
+      },
+    );
+
+    testWidgets('explicit maxContentWidth is honored on dashboard', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1600, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final source = FakeSource(
+        dashboardData: DashboardData.fromJson(const {
+          'widgets': [
+            {
+              'type': 'stats',
+              'stats': [
+                {'label': 'Orders', 'value': '1340'},
+              ],
+            },
+          ],
+        }),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: DashboardScreen(
+              provider: DashboardProvider(source),
+              maxContentWidth: 800,
+            ),
+          ),
+        ),
+      );
+      await pumpUntilFound(tester, find.text('Orders'));
+
+      // 800 < the 1200 default: only an applied value can satisfy this.
+      expectWidthCapped(
+        tester,
+        find.byKey(const ValueKey('dashboard-constrained-content')),
+        cap: 800,
+        viewportWidth: 1600,
+      );
+    });
   });
 }

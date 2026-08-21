@@ -17,6 +17,9 @@ import 'package:filament_mobile/data/options_page.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _StubSource implements ResourceDataSource {
+  @override
+  Future<void> reorder(String resourceKey, List<Object> ids) =>
+      throw UnimplementedError();
   _StubSource({
     this.panelResult,
     this.error,
@@ -99,6 +102,7 @@ class _StubSource implements ResourceDataSource {
     String? search,
     String? sort,
     String? direction,
+    bool reorder = false,
   }) async => throw UnimplementedError();
 
   @override

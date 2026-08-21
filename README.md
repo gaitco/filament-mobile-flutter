@@ -73,10 +73,68 @@ host whose HTTP client carries no base URL of its own.
 A full runnable host — real HTTP transport, schema cache, upload, file picker
 and link handling — is in [`example/`](example).
 
+## Wide screens
+
+![Phone, tablet and desktop layouts](https://raw.githubusercontent.com/gaitco/filament-mobile-flutter/main/art/wide.png)
+
+The individual screens above are all you need for a phone. On a tablet or
+desktop window, `PanelShell` assembles them into one adaptive shell —
+drawer (compact, < 600dp) / `NavigationRail` (medium, 600–839dp) / sidebar +
+master list + detail pane (expanded, ≥ 840dp) — and keeps the selected
+resource and record across a resize:
+
+```dart
+PanelShell(
+  source: source,
+  panelProvider: PanelProvider(source),
+  onLogout: () => setState(() => _token = null),
+  iconFor: (resource) => switch (resource.key) {
+    'products' => Icons.view_in_ar_outlined,
+    _ => Icons.folder_outlined,
+  },
+);
+```
+
+That is the whole wiring: no `Navigator.push`, no per-breakpoint layout code.
+The example app ([`example/lib/main.dart`](example/lib/main.dart)) runs on
+exactly this.
+
+Compose your own shell instead if `PanelShell`'s three-layout assembly does
+not fit — the pieces it is built from are public:
+
+- **`FilamentLayout.of(context)`** / **`FilamentBreakpoints`** — the active
+  `FilamentFormFactor` (`compact` / `medium` / `expanded`) for a width, so
+  your own widget tree can branch the same way `PanelShell` does.
+- **`ResourceListScreen(rowStyle: ListRowStyle.row, selectedRecordId: ...)`**
+  — a header row plus dense table rows instead of cards, with one row
+  highlighted for whatever the adjacent detail pane is showing. Unset, the
+  style follows the form factor: cards on a phone, rows on anything wider.
+  A row drops its date column below 560dp and its badges below 300dp rather
+  than clipping them, so a narrow pane still reads.
+- **`maxContentWidth`** on `ResourceViewScreen`, `ResourceFormScreen` and
+  `DashboardScreen` — each caps and centres its content by default on a wide
+  viewport; pass a value (or `double.infinity`) to override it. Lists get an
+  always-visible scrollbar on a non-compact viewport.
+- **`ResourceFormScreen(onSaved: ...)`** — fires after a successful save
+  instead of only popping the route, for a host that keeps the form in
+  place (a detail pane) rather than pushing it.
+
+Override the breakpoints by passing your own `FilamentBreakpoints` to
+`PanelShell` (or to a `FilamentLayout` you install yourself):
+
+```dart
+PanelShell(
+  source: source,
+  panelProvider: panelProvider,
+  breakpoints: const FilamentBreakpoints(medium: 720, expanded: 1024),
+);
+```
+
 ## What ships
 
 | Feature | What you get |
 |---|---|
+| [Wide screens](#wide-screens) | `PanelShell` — drawer / rail / sidebar + master-detail, by form factor |
 | [Actions](#actions) | Buttons the server already authorised for this record |
 | [Upload](#upload) | Single- and multi-file upload, through an additive port your existing transport need not implement |
 | [Repeater](#repeater) | Add and remove rows, validated per row |

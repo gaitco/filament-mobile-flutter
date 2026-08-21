@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import '../data/resource_record.dart';
 import '../schema/card_layout.dart';
 import '../schema/resource_schema.dart';
+import 'layout.dart';
 import 'resource_card.dart';
+import 'resource_row.dart';
 
 /// The loading placeholder shared by every paginated card list in this
 /// package: six faded [ResourceCard]s.
@@ -60,12 +62,26 @@ class PaginatedCardList extends StatelessWidget {
     required this.controller,
     this.onRecordTap,
     this.rowTrailing,
+    this.rowStyle = ListRowStyle.card,
+    this.header,
+    this.selectedRecordId,
     super.key,
   });
 
   final List<ResourceRecord> records;
   final CardLayout layout;
   final bool isLoadingMore;
+
+  /// `card` (the default) renders exactly what this widget always has —
+  /// one [ResourceCard] per record. `row` renders [ResourceRow]s with a
+  /// thin divider between them instead, for wide screens (P23).
+  final ListRowStyle rowStyle;
+
+  /// Pinned above the first row when set — typically a [ResourceRowHeader]
+  /// in `row` style. Rendered as the list's own first item rather than a
+  /// sticky overlay: simpler, and nothing here needs it to stay pinned
+  /// while scrolling.
+  final Widget? header;
 
   /// True right after the most recent `loadMore()` call failed — cleared by
   /// the provider as soon as another fetch (a retry, a fresh `load()`, a
@@ -83,6 +99,10 @@ class PaginatedCardList extends StatelessWidget {
   final ScrollController controller;
   final void Function(ResourceRecord record)? onRecordTap;
 
+  /// The record whose row paints selected — `row` style only, a card has no
+  /// selected state. `PanelShell`'s master pane sets this (P23).
+  final Object? selectedRecordId;
+
   /// Builds a row's trailing widget (edit/delete affordances on a relation
   /// list — P9), or returns null for a row with none. Null itself — every
   /// resource list — renders exactly the cards this widget always has.
@@ -90,29 +110,61 @@ class PaginatedCardList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return RefreshIndicator(
+    final headerCount = header == null ? 0 : 1;
+
+    final listView = ListView.separated(
+      controller: controller,
+      // A list shorter than its viewport is otherwise not scrollable at
+      // all, which makes the RefreshIndicator above impossible to pull —
+      // refresh must work on a one-row list too.
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(8),
+      itemCount:
+          headerCount +
+          records.length +
+          (isLoadingMore || loadMoreFailed ? 1 : 0),
+      // A thin divider between rows in `row` style — a table, not a stack
+      // of cards. Cards already carry their own margin, so this stays
+      // invisible there.
+      separatorBuilder: (context, index) => rowStyle == ListRowStyle.row
+          ? const Divider(height: 1)
+          : const SizedBox.shrink(),
+      itemBuilder: (context, index) {
+        if (header != null && index == 0) return header!;
+
+        final recordIndex = index - headerCount;
+        if (recordIndex >= records.length) return _trailingRow();
+
+        final record = records[recordIndex];
+        final onTap = onRecordTap == null ? null : () => onRecordTap!(record);
+        final trailing = rowTrailing?.call(record);
+
+        return rowStyle == ListRowStyle.row
+            ? ResourceRow(
+                layout: layout,
+                record: record,
+                onTap: onTap,
+                trailing: trailing,
+                selected: record.id == selectedRecordId,
+              )
+            : ResourceCard(
+                layout: layout,
+                record: record,
+                onTap: onTap,
+                trailing: trailing,
+              );
+      },
+    );
+
+    final refreshIndicator = RefreshIndicator(
       onRefresh: onRefresh,
-      child: ListView.builder(
-        controller: controller,
-        // A list shorter than its viewport is otherwise not scrollable at
-        // all, which makes the RefreshIndicator above impossible to pull —
-        // refresh must work on a one-row list too.
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(8),
-        itemCount: records.length + (isLoadingMore || loadMoreFailed ? 1 : 0),
-        itemBuilder: (context, index) {
-          if (index >= records.length) return _trailingRow();
+      child: listView,
+    );
 
-          final record = records[index];
-
-          return ResourceCard(
-            layout: layout,
-            record: record,
-            onTap: onRecordTap == null ? null : () => onRecordTap!(record),
-            trailing: rowTrailing?.call(record),
-          );
-        },
-      ),
+    return Scrollbar(
+      controller: controller,
+      thumbVisibility: !FilamentLayout.isCompact(context),
+      child: refreshIndicator,
     );
   }
 

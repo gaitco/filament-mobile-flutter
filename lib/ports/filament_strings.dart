@@ -25,6 +25,7 @@ class FilamentStrings {
     this.timeFieldRange = _defaultTimeRange,
     this.save = 'Save',
     this.saveFailed = 'Could not save',
+    this.saved = 'Saved',
     this.deleteConfirmTitle = 'Delete this record?',
     this.deleteConfirmBody = 'This cannot be undone.',
     this.deleteConfirm = 'Delete',
@@ -47,6 +48,13 @@ class FilamentStrings {
     this.relationEmpty = 'Nothing here yet',
     this.relationFailed = 'Could not load',
     this.keepTypingToNarrowList = 'Keep typing to narrow the list',
+    this.reorderRecords = 'Reorder',
+    this.doneReordering = 'Done',
+    this.reorderFailed = 'Could not save the new order',
+    this.cancelReordering = 'Cancel reordering',
+    this.noRecordSelected = 'Select a record',
+    this.dashboardTitle = 'Dashboard',
+    this.logOut = 'Log out',
   });
 
   final String retry;
@@ -99,6 +107,9 @@ class FilamentStrings {
 
   final String save;
   final String saveFailed;
+
+  /// Toast after a successful save, shown on the screen the form returns to.
+  final String saved;
   final String deleteConfirmTitle;
   final String deleteConfirmBody;
   final String deleteConfirm;
@@ -185,6 +196,38 @@ class FilamentStrings {
   /// record keeps typing instead of concluding it does not exist.
   final String keepTypingToNarrowList;
 
+  /// Tooltip on `ResourceListScreen`'s reorder toggle (P18) — icon-only, so
+  /// it needs an accessible name for the same reason [create]/[edit] do.
+  /// Shown only when `resource.reorder != null` — see that screen's class
+  /// doc.
+  final String reorderRecords;
+
+  /// The AppBar action that commits the current drag order and closes
+  /// reorder mode — `ResourceListProvider.saveReorder()`'s trigger.
+  final String doneReordering;
+
+  /// Shown when `saveReorder()`'s POST fails and the server sent no message
+  /// — the drag order is rolled back to the last server-confirmed one when
+  /// this is shown, same as every other write's failure in this package.
+  final String reorderFailed;
+
+  /// Tooltip on the AppBar's exit-without-saving control, shown only while
+  /// reordering — `ResourceListProvider.exitReorderMode()`'s trigger.
+  /// Icon-only, so it needs an accessible name for the same reason
+  /// [reorderRecords] does.
+  final String cancelReordering;
+
+  /// `PanelShell`'s detail-pane placeholder at the expanded form factor,
+  /// shown while no master row is selected (P23).
+  final String noRecordSelected;
+
+  /// `PanelShell`'s home AppBar title and sidebar entry for the dashboard.
+  final String dashboardTitle;
+
+  /// `PanelShell`'s profile-menu item, shown only when the host wired
+  /// `onLogout`.
+  final String logOut;
+
   static String _defaultMin(num bound) => 'Must be at least $bound';
   static String _defaultMax(num bound) => 'Must be at most $bound';
 
@@ -231,6 +274,7 @@ class FilamentStrings {
     },
     save: 'حفظ',
     saveFailed: 'تعذّر الحفظ',
+    saved: 'تم الحفظ',
     deleteConfirmTitle: 'هل تريد حذف هذا السجل؟',
     deleteConfirmBody: 'لا يمكن التراجع عن هذا الإجراء.',
     deleteConfirm: 'حذف',
@@ -253,6 +297,13 @@ class FilamentStrings {
     relationEmpty: 'لا يوجد شيء هنا بعد',
     relationFailed: 'تعذّر التحميل',
     keepTypingToNarrowList: 'واصل الكتابة لتضييق القائمة',
+    reorderRecords: 'إعادة ترتيب',
+    doneReordering: 'تم',
+    reorderFailed: 'تعذّر حفظ الترتيب الجديد',
+    cancelReordering: 'إلغاء إعادة الترتيب',
+    noRecordSelected: 'اختر سجلًا',
+    dashboardTitle: 'لوحة التحكم',
+    logOut: 'تسجيل الخروج',
   );
 
   /// The one resolver the common case needs: a locale in, strings out.

@@ -102,5 +102,29 @@ void main() {
       expect(find.byType(CircularProgressIndicator), findsNothing);
       expect(find.byKey(const ValueKey('loadMore.failed')), findsNothing);
     });
+
+    testWidgets('scrollbar is visible at 1200px viewport', (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(harness());
+
+      expect(find.byType(Scrollbar), findsOneWidget);
+      final scrollbar = tester.widget<Scrollbar>(find.byType(Scrollbar));
+      expect(scrollbar.thumbVisibility, isTrue);
+    });
+
+    testWidgets('scrollbar is not visible at 400px viewport', (tester) async {
+      tester.view.physicalSize = const Size(400, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(harness());
+
+      expect(find.byType(Scrollbar), findsOneWidget);
+      final scrollbar = tester.widget<Scrollbar>(find.byType(Scrollbar));
+      expect(scrollbar.thumbVisibility, isFalse);
+    });
   });
 }

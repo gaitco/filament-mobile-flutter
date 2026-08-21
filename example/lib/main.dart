@@ -26,6 +26,14 @@ void main() => runApp(const FilamentMobileExampleApp());
 const _baseUrl = String.fromEnvironment('FILAMENT_BASE_URL');
 const _token = String.fromEnvironment('FILAMENT_TOKEN');
 
+/// Route prefix of the serving package: filament-mobile's default, or
+/// `/api/nova-mobile` for a Laravel Nova host running gait/nova-mobile —
+/// the contract is identical, only the mount point differs.
+const _prefix = String.fromEnvironment(
+  'FILAMENT_PREFIX',
+  defaultValue: '/api/mobile-panel',
+);
+
 class FilamentMobileExampleApp extends StatelessWidget {
   const FilamentMobileExampleApp({super.key});
 
@@ -140,6 +148,7 @@ class _SessionState extends State<_Session> {
       baseUrl: widget.baseUrl,
       token: () => widget.token,
     ),
+    prefix: _prefix,
     cache: InMemorySchemaCache(),
     // Scoped to the token, not a constant: `/schema` is per-user, so a
     // shared key would let a second signed-in user on this device open the
@@ -210,9 +219,7 @@ class _SessionState extends State<_Session> {
       drawer: Drawer(child: _sidebar()),
       body: DashboardScreen(
         provider: _dashboard,
-        chartBuilder: flChartBuilder(
-          strings: FilamentChartStrings.forLocale('en'),
-        ),
+        chartBuilder: flChartBuilder(strings: const FilamentChartStrings()),
         // A stat whose web ->url() targets an opted-in resource arrives
         // with its resourceKey — tapping the tile opens that resource's
         // list, the phone's equivalent of the web tile's link.

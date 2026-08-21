@@ -123,3 +123,17 @@ Map<String, String> stringMap(Map<String, dynamic> json, String key) {
         entry.key as String: entry.value as String,
   };
 }
+
+/// Reads a flat list of strings at [key], dropping any non-string element.
+/// Missing or wrong-shaped reads as an empty list — the same tolerant
+/// widening as [opt], for a key that is ORDERING metadata rather than a
+/// source of truth (`panel.locales`): a malformed value degrading to "no
+/// preferred order" is harmless, so it is never worth a thrown exception.
+List<String> stringList(Map<String, dynamic> json, String key) {
+  final value = json[key];
+  if (value is! List) return const [];
+  return [
+    for (final item in value)
+      if (item is String) item,
+  ];
+}

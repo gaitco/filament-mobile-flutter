@@ -89,6 +89,30 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('a media sibling feeds the leading image', (tester) async {
+    final layout = CardLayout.fromJson(const {
+      'title': {'field': 'name'},
+      'leading': {'type': 'image', 'field': 'cover'},
+    }, 'card');
+    final record = ResourceRecord.fromJson(const {
+      'id': 1,
+      'name': 'Trip',
+      'cover': 'uuid-1', // raw value is an opaque token, NOT a URL
+      'cover.__media': [
+        {
+          'uuid': 'uuid-1',
+          'url': 'https://x/c.jpg',
+          'thumbUrl': 'https://x/t.jpg',
+        },
+      ],
+    }, 'id');
+
+    await tester.pumpWidget(wrap(ResourceCard(layout: layout, record: record)));
+
+    final avatar = tester.widget<CircleAvatar>(find.byType(CircleAvatar));
+    expect((avatar.backgroundImage as NetworkImage).url, 'https://x/t.jpg');
+  });
+
   testWidgets(
     'a badge with no colour match renders neutrally with its raw value',
     (tester) async {

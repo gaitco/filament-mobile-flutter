@@ -11,6 +11,8 @@ final class EntryComponent extends SchemaComponent {
     required this.colors,
     required this.format,
     required this.fallback,
+    this.targetResource,
+    this.targetRecordPath,
   }) : super._common(common);
 
   factory EntryComponent._fromJson(
@@ -19,6 +21,7 @@ final class EntryComponent extends SchemaComponent {
     String path,
   ) {
     final config = object(json, 'config', path) ?? const {};
+    final target = object(config, 'target', path);
     return EntryComponent._(
       common: common,
       kind: switch (common.type) {
@@ -32,6 +35,8 @@ final class EntryComponent extends SchemaComponent {
       colors: stringMap(config, 'colors'),
       format: opt<String>(config, 'format'),
       fallback: opt<String>(config, 'fallback'),
+      targetResource: target == null ? null : opt<String>(target, 'resource'),
+      targetRecordPath: target == null ? null : opt<String>(target, 'record'),
     );
   }
 
@@ -45,4 +50,13 @@ final class EntryComponent extends SchemaComponent {
 
   /// Placeholder strategy, for [EntryKind.image].
   final String? fallback;
+
+  /// The resource behind a dotted entry's relation ('categories' for
+  /// `category.name`), published only when the server resolved it to
+  /// exactly one opted-in resource. Null means the entry is plain text.
+  final String? targetResource;
+
+  /// The record-payload path holding the related record's id
+  /// ('category.id'), the sibling [targetResource] navigates with.
+  final String? targetRecordPath;
 }

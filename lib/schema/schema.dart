@@ -2,6 +2,7 @@ export 'card_layout.dart';
 // req/opt/object/objects/closedEnum are parser internals — only the exception
 // they throw is public API.
 export 'json_reader.dart' show SchemaFormatException;
+export 'media_set.dart';
 export 'relation_descriptor.dart';
 export 'rich_document.dart';
 export 'resource_labels.dart';

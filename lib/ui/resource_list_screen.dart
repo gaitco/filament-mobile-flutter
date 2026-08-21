@@ -48,6 +48,11 @@ class _ResourceListScreenState extends State<ResourceListScreen> {
   void initState() {
     super.initState();
     _scroll.addListener(_onScroll);
+    // On the provider, not in build(): rebuilds happen inside the body's
+    // ListenableBuilder, so the State's own build() runs once — against the
+    // skeleton, whose list never attaches [_scroll]. Each page landing is
+    // what must re-check whether the viewport is still short.
+    widget.provider.addListener(_scheduleFillCheck);
     // Only an untouched provider is loaded. The host owns the provider, so a
     // host that keeps one per resource would otherwise have its list blanked
     // and refetched every time the user came back from a record.
@@ -59,16 +64,32 @@ class _ResourceListScreenState extends State<ResourceListScreen> {
   @override
   void dispose() {
     _searchTimer?.cancel();
+    widget.provider.removeListener(_scheduleFillCheck);
     _scroll
       ..removeListener(_onScroll)
       ..dispose();
     super.dispose();
   }
 
+  void _scheduleFillCheck() {
+    WidgetsBinding.instance.addPostFrameCallback(_fillShortViewport);
+  }
+
   void _onScroll() {
     if (_scroll.position.pixels >= _scroll.position.maxScrollExtent * 0.8) {
       widget.provider.loadMore();
     }
+  }
+
+  /// A first page shorter than the viewport leaves nothing to scroll, so
+  /// [_onScroll] can never fire and the user is stranded on it. Checked after
+  /// every build: each appended page notifies, rebuilds, and re-checks, until
+  /// the list overflows or `hasMore` runs out. `loadMore()`'s own guards make
+  /// the repeat calls free.
+  void _fillShortViewport(Duration _) {
+    if (!mounted || !_scroll.hasClients) return;
+    if (_scroll.position.maxScrollExtent > 0) return;
+    widget.provider.loadMore();
   }
 
   /// Debouncing lives here rather than in the provider: this is where the

@@ -45,6 +45,22 @@ void main() {
       expect(panel.resource('missing'), isNull);
     });
 
+    test('parses a resource badge, and absence reads as no badge', () {
+      final json = panelJson();
+      ((json['resources'] as List).first as Map<String, dynamic>)['badge'] = {
+        'value': '124',
+        'color': 'warning',
+      };
+
+      final panel = PanelSchema.fromJson(json);
+      final badged = panel.resources.first.badge;
+      expect(badged, isNotNull);
+      expect(badged!.value, '124');
+      expect(badged.color, 'warning');
+      // The server omits the key when a resource declares none.
+      expect(panel.resources.last.badge, isNull);
+    });
+
     test('rejects a newer contract version rather than half-parsing it', () {
       expect(
         () => PanelSchema.fromJson(panelJson(version: 2)),
@@ -247,6 +263,52 @@ void main() {
             resource.direction,
             PanelDirection.rtl,
             reason: '${resource.key} did not inherit the panel direction',
+          );
+        }
+      });
+    });
+
+    group('locales', () {
+      test('an absent locales reads as an empty list, never guessed at', () {
+        final json = panelJson();
+        expect(
+          (json['panel'] as Map<String, dynamic>).containsKey('locales'),
+          isFalse,
+        );
+
+        expect(PanelSchema.fromJson(json).locales, isEmpty);
+      });
+
+      test('parses a flat, ordered locales list off the panel block', () {
+        final json = panelJson();
+        (json['panel'] as Map<String, dynamic>)['locales'] = ['ar', 'en'];
+
+        expect(PanelSchema.fromJson(json).locales, ['ar', 'en']);
+      });
+
+      test('a non-string element is dropped rather than thrown on — this '
+          'key is ordering metadata, not a source of truth', () {
+        final json = panelJson();
+        (json['panel'] as Map<String, dynamic>)['locales'] = ['ar', 7, 'en'];
+
+        expect(PanelSchema.fromJson(json).locales, ['ar', 'en']);
+      });
+
+      test('every resource carries the panel\'s locales, not just the first '
+          '— the fixture has two resources so a bug that populated only the '
+          'first fails here', () {
+        final json = panelJson();
+        (json['panel'] as Map<String, dynamic>)['locales'] = ['ar', 'en'];
+        expect(json['resources'], hasLength(greaterThan(1)));
+
+        final panel = PanelSchema.fromJson(json);
+
+        expect(panel.resources, hasLength(greaterThan(1)));
+        for (final resource in panel.resources) {
+          expect(
+            resource.locales,
+            ['ar', 'en'],
+            reason: '${resource.key} did not inherit the panel locales',
           );
         }
       });

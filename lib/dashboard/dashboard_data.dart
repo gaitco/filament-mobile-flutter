@@ -103,6 +103,7 @@ class StatData extends Equatable {
     this.descriptionIcon,
     this.color,
     this.chart,
+    this.resourceKey,
   });
 
   /// Null when `label` or `value` is missing — a stat the client cannot
@@ -124,6 +125,9 @@ class StatData extends Equatable {
           : null,
       color: json['color'] is String ? json['color'] as String : null,
       chart: _numbers(json['chart']),
+      resourceKey: json['resourceKey'] is String
+          ? json['resourceKey'] as String
+          : null,
     );
   }
 
@@ -131,6 +135,12 @@ class StatData extends Equatable {
   final String value;
   final String? description;
   final String? descriptionIcon;
+
+  /// The mobile resource this stat's web `->url()` points at, published by
+  /// the server only when that URL is an opted-in resource's own index.
+  /// Null for every other URL — external, unopted, custom page — and for a
+  /// stat with no URL at all: half a target is worse than none.
+  final String? resourceKey;
 
   /// A semantic colour name (`success`, `danger`, …) — the same vocabulary
   /// `RecordAction.color` uses.
@@ -149,6 +159,7 @@ class StatData extends Equatable {
     descriptionIcon,
     color,
     chart,
+    resourceKey,
   ];
 }
 

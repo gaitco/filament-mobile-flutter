@@ -10,8 +10,9 @@ part of '../schema_component.dart';
 /// direction: an absent key means a server predating multi-file support,
 /// and a client must never invent a capability the server did not declare.
 /// A current server publishes the key on every `file` node, `false` for
-/// single. When true, the field's value is a `List<String>` of stored paths
-/// everywhere — on a record, in form state, in a write body.
+/// single. When true, the field's value is a `List<String>` everywhere — on
+/// a record, in form state, in a write body — of stored path or media
+/// uuid: an opaque string token the server round-trips.
 final class FileComponent extends SchemaComponent {
   FileComponent._({
     required _CommonProperties common,

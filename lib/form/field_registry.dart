@@ -80,7 +80,11 @@ class FieldRegistry {
       ),
       DateComponent() => DateFieldWidget(component: component, state: state),
       ColorComponent() => ColorFieldWidget(component: component, state: state),
-      FileComponent() => FileFieldWidget(component: component, state: state),
+      FileComponent() => FileFieldWidget(
+        component: component,
+        state: state,
+        media: state.media,
+      ),
       TagsComponent() => TagsFieldWidget(component: component, state: state),
       KeyValueComponent() => KeyValueFieldWidget(
         component: component,

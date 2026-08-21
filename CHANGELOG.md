@@ -1,5 +1,60 @@
 # Changelog
 
+## 0.9.2 — 2026-08-21
+
+- **P17: translatable fields render as one field with locale chips,
+  instead of a stacked field per locale.** `ResourceFormScreen`'s node walk
+  groups consecutive-or-not `translatable: true` leaves sharing a dotted
+  name's head into one field slot, with a chip row above it — one chip per
+  locale, labelled by the uppercased locale code parsed off the field's own
+  name, no `intl` dependency. Chips order by the new `ResourceSchema.locales`
+  (propagated from `panel.locales` at parse time, the same way
+  `ResourceSchema.direction` already is — no host wiring needed) when
+  non-empty, else by appearance. Selecting a
+  chip only changes which member renders — every locale's value stays in
+  `FormValues` and the submitted payload still carries all of them, so
+  submission logic is unchanged. A 422 keyed to a non-visible member
+  force-switches the chip to it, matching the official web plugin's rule
+  that an error must never hide behind a chip. A group of one locale
+  renders chipless, exactly as today. Both `PanelSchema.locales` and
+  `SchemaComponent.translatable` are tolerant of absence: an old server (no
+  annotation) or an old client (annotation present but unread) both fall
+  back to today's stacked-per-locale-field rendering, unchanged.
+
+- sluggable panels work as-is; no client changes.
+
+- **P14: medialibrary-backed fields and entries render for real.** A
+  `SpatieMediaLibraryFileUpload` or `SpatieMediaLibraryImageEntry` field used
+  to degrade to a bare uuid string, or nothing at all. `MediaItem`/`MediaSet`
+  (`lib/schema/media_set.dart`) parse the flat `<field>.__media` sibling a
+  medialibrary-backed field now publishes beside its raw value — one
+  `{uuid, url, thumbUrl, name, size, mime}` entry per media item.
+  `MediaSet.of(record, field)` is sibling-first, everywhere a media path can
+  appear:
+  - **Card leading image** (`resource_card.dart`) reads the sibling first,
+    falling back to today's raw-string behaviour byte for byte when it is
+    absent.
+  - **`image_entry`** (`entry_registry.dart`) resolves through the sibling
+    the same way, so `SpatieMediaLibraryImageEntry` actually renders instead
+    of a blank tile.
+  - **File field** (`field_widgets.dart`) shows the sibling's `name` (e.g.
+    `photo.jpg`) instead of the raw uuid, with a small `thumbUrl` thumbnail
+    leading each row when the server provides one. Value handling — a
+    `List<String>` of opaque tokens, kept/removed/appended, `maxFiles`
+    gating — is unchanged; a kept uuid and a freshly-uploaded path are both
+    just opaque strings to the client.
+  - A malformed or resolved-to-nothing item is dropped rather than failing
+    the whole set; an absent sibling (old server, non-media field, or field
+    simply not on the record) reads as "nothing to show", never an error.
+  - **Testing**: `MediaSet`/`MediaItem` parse tests, sibling-present vs.
+    absent card-leading and `image_entry` coverage, file-field name/thumbnail
+    display, and a contract test (`test/media_record_contract_test.dart`)
+    against the new `contract/media-record.json` golden.
+
+- **P15: `SpatieTagsInput` support is server-side only** — it publishes as
+  the existing `tags` node with the same `List<String>` wire value, so
+  there is no client change to make.
+
 ## 0.9.1 — 2026-08-19
 
 Packaging only — no code change, no API change. Adds `.pubignore` so the

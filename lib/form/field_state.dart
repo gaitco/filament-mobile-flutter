@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../data/options_page.dart';
 import '../ports/filament_file_picker.dart';
 import '../ports/filament_strings.dart';
+import '../schema/media_set.dart';
 
 /// Everything one form field widget needs to render itself, handed down by a
 /// form provider so the widget never reaches into [FormValues] or the schema
@@ -18,6 +19,7 @@ class FieldState {
     this.searchOptionsFor,
     this.filePicker,
     this.uploadFile,
+    this.media,
     this.strings = const FilamentStrings(),
   });
 
@@ -73,6 +75,13 @@ class FieldState {
     required String filename,
   })?
   uploadFile;
+
+  /// The record's resolved media for this field, when the record carried a
+  /// `'<name>.__media'` sibling — null on create, and null for every
+  /// non-file field, the same as [filePicker] and [uploadFile]. A stored
+  /// value that matches one of these items by `uuid` displays that item's
+  /// name and thumbnail instead of the raw token; see `FileFieldWidget`.
+  final MediaSet? media;
 
   /// Labels for `FileFieldWidget`'s choose control, in-flight state and
   /// unavailable note. Defaulted, not optional, like every other host-facing

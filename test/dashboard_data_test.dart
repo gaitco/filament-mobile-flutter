@@ -50,6 +50,23 @@ void main() {
     expect(widget.stats.first.chart, [7.0, 12.0, 9.0]);
     expect(widget.stats.last.description, isNull);
     expect(widget.stats.last.chart, isNull);
+    expect(widget.stats.last.resourceKey, isNull);
+  });
+
+  test('parses a stat resourceKey — the mobile mirror of its web url', () {
+    final data = DashboardData.fromJson(const {
+      'widgets': [
+        {
+          'type': 'stats',
+          'stats': [
+            {'label': 'Drafts', 'value': '124', 'resourceKey': 'articles'},
+          ],
+        },
+      ],
+    });
+
+    final widget = data.widgets.single as StatsWidgetData;
+    expect(widget.stats.single.resourceKey, 'articles');
   });
 
   test('parses a chart widget', () {

@@ -65,6 +65,7 @@ class PanelSchema extends Equatable {
     required this.id,
     required this.title,
     this.locale = '',
+    this.locales = const [],
     this.direction = PanelDirection.ltr,
     this.navigation = const [],
     this.resources = const [],
@@ -87,6 +88,7 @@ class PanelSchema extends Equatable {
     // unrecognised value — the server normalises `direction` to ltr/rtl, but
     // the client re-checks rather than trusting that it did.
     final direction = PanelDirection.fromJson(panel['direction']);
+    final locales = stringList(panel, 'locales');
 
     // Read directly rather than through objects(): the resources array is at
     // the document root, so its children must report `resources[0]`, not
@@ -118,6 +120,7 @@ class PanelSchema extends Equatable {
       id: req<String>(panel, 'id', 'panel'),
       title: req<String>(panel, 'title', 'panel'),
       locale: opt<String>(panel, 'locale') ?? '',
+      locales: locales,
       direction: direction,
       navigation: List.generate(
         navigationNodes.length,
@@ -126,15 +129,17 @@ class PanelSchema extends Equatable {
           'panel.navigation[$index]',
         ),
       ),
-      // One value, one source: the panel's direction is propagated into
-      // every resource here, at parse time, rather than threaded through the
-      // host at render time. See PanelDirection's doc comment.
+      // One value, one source: the panel's direction (and locales) are
+      // propagated into every resource here, at parse time, rather than
+      // threaded through the host at render time. See PanelDirection's doc
+      // comment and [ResourceSchema.locales].
       resources: List.generate(
         resourceNodes.length,
         (index) => ResourceSchema.fromJson(
           resourceNodes[index],
           'resources[$index]',
           direction: direction,
+          locales: locales,
         ),
       ),
     );
@@ -151,6 +156,13 @@ class PanelSchema extends Equatable {
   /// it for its own formatting. Not used by this package to decide
   /// [direction] — that is read from its own key, independently.
   final String locale;
+
+  /// The panel's declared locales, flat and in display order — absent (or
+  /// unanswerable server-side) reads as `[]`, never guessed at from a
+  /// dotted field name. The client uses it only to ORDER a translatable
+  /// group's chips; the chips themselves come from the form's own fields,
+  /// which stay the source of truth for which locales actually exist.
+  final List<String> locales;
 
   /// The panel's layout direction. Absent or unrecognised reads as
   /// [PanelDirection.ltr] — see [PanelDirection.fromJson].

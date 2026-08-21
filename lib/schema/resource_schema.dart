@@ -96,18 +96,24 @@ class ResourceSchema extends Equatable {
     this.infolist = const [],
     this.relations = const [],
     this.group,
+    this.badge,
     this.direction = PanelDirection.ltr,
+    this.locales = const [],
   });
 
   /// [direction] is not read off [json] — a resource's direction always
   /// comes from its panel. It defaults to [PanelDirection.ltr] so a directly
   /// constructed resource (tests, the contract test, [ResourceSchema.fake])
   /// keeps working unchanged; [PanelSchema.fromJson] passes the panel's
-  /// parsed direction into every resource it builds.
+  /// parsed direction into every resource it builds. [locales] follows the
+  /// same rule, for the same reason: `panel.locales` is a panel-level fact,
+  /// not a per-resource one, so it is propagated here rather than read off
+  /// each resource's own JSON (which carries none).
   factory ResourceSchema.fromJson(
     Map<String, dynamic> json,
     String path, {
     PanelDirection direction = PanelDirection.ltr,
+    List<String> locales = const [],
   }) {
     final sortNodes = objects(json, 'sorts', path);
     final rawGroup = opt<String>(json, 'group');
@@ -147,7 +153,12 @@ class ResourceSchema extends Equatable {
         direction: direction,
       ),
       group: rawGroup?.isEmpty ?? false ? null : rawGroup,
+      badge: switch (object(json, 'badge', path)) {
+        final badge? => ResourceBadge.fromJson(badge),
+        null => null,
+      },
       direction: direction,
+      locales: locales,
     );
   }
 
@@ -192,10 +203,21 @@ class ResourceSchema extends Equatable {
   final List<RelationDescriptor> relations;
   final String? group;
 
+  /// The web sidebar's count badge, or null when the resource declares none
+  /// — the server omits the key entirely in that case, same as [group].
+  final ResourceBadge? badge;
+
   /// The owning panel's layout direction, propagated at parse time by
   /// [PanelSchema.fromJson]. Defaults to [PanelDirection.ltr] for a
   /// directly-constructed resource — see [ResourceSchema.fromJson].
   final PanelDirection direction;
+
+  /// `panel.locales`, propagated at parse time by [PanelSchema.fromJson] —
+  /// see [PanelSchema.locales] for the contract. Defaults to `const []` for
+  /// a directly-constructed resource, same as [direction]. Used only to
+  /// order a translatable group's chips; the chips themselves come from
+  /// this resource's own `translatable` form fields.
+  final List<String> locales;
 
   ResourceSort? get defaultSort {
     for (final sort in sorts) {
@@ -210,4 +232,24 @@ class ResourceSchema extends Equatable {
   /// a cached one — it always will not.
   @override
   List<Object?> get props => [key, group];
+}
+
+/// The web sidebar's count badge for one resource — the value is whatever
+/// string the panel renders (usually a count), the colour the same semantic
+/// vocabulary card badges use (`success`, `warning`, …).
+class ResourceBadge extends Equatable {
+  const ResourceBadge({required this.value, this.color});
+
+  factory ResourceBadge.fromJson(Map<String, dynamic> json) {
+    return ResourceBadge(
+      value: json['value'] is String ? json['value'] as String : '',
+      color: json['color'] is String ? json['color'] as String : null,
+    );
+  }
+
+  final String value;
+  final String? color;
+
+  @override
+  List<Object?> get props => [value, color];
 }

@@ -1,6 +1,7 @@
 import 'package:filament_mobile/data/resource_record.dart';
 import 'package:filament_mobile/schema/schema_component.dart';
 import 'package:filament_mobile/ui/bidi_text.dart';
+import 'package:filament_mobile/ui/entries/entry_widgets.dart';
 import 'package:filament_mobile/ui/entry_registry.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -38,6 +39,74 @@ void main() {
 
     expect(find.text('الاسم'), findsOneWidget);
     expect(find.text('أحمد'), findsOneWidget);
+  });
+
+  testWidgets('a targeted entry taps through to its related record, and '
+      'stays inert when any half is missing', (tester) async {
+    const targeted = {
+      'type': 'text_entry',
+      'name': 'category.name',
+      'label': 'Category',
+      'config': {
+        'target': {'resource': 'categories', 'record': 'category.id'},
+      },
+    };
+    final record = ResourceRecord.fromJson(const {
+      'id': 1,
+      'category': {'name': 'Toys', 'id': 6},
+    }, 'id');
+
+    // Server target + record id + host callback: taps through.
+    (String, Object)? tapped;
+    await tester.pumpWidget(
+      host(
+        Builder(
+          builder: (context) => EntryRegistry.defaults(
+            onRelatedTap: (resource, id) => tapped = (resource, id),
+          ).build(context, parse(targeted), record),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Toys'));
+    expect(tapped, ('categories', 6));
+
+    // Host never wired it: plain tile, no tap target at all.
+    await tester.pumpWidget(
+      host(
+        Builder(
+          builder: (context) =>
+              EntryRegistry.defaults().build(context, parse(targeted), record),
+        ),
+      ),
+    );
+    expect(
+      find.byKey(const ValueKey('entry.related.category.name')),
+      findsNothing,
+    );
+
+    // Wired, but the payload carries no id (older server, null relation):
+    // plain tile again.
+    await tester.pumpWidget(
+      host(
+        Builder(
+          builder: (context) =>
+              EntryRegistry.defaults(
+                onRelatedTap: (resource, id) => fail('must not fire'),
+              ).build(
+                context,
+                parse(targeted),
+                ResourceRecord.fromJson(const {
+                  'id': 1,
+                  'category': {'name': 'Toys'},
+                }, 'id'),
+              ),
+        ),
+      ),
+    );
+    expect(
+      find.byKey(const ValueKey('entry.related.category.name')),
+      findsNothing,
+    );
   });
 
   testWidgets('renders a boolean entry as an icon, not raw true', (
@@ -176,6 +245,69 @@ void main() {
     );
 
     expect(find.text('custom!'), findsOneWidget);
+  });
+
+  testWidgets('an image entry resolves the URL from a media sibling', (
+    tester,
+  ) async {
+    final record = ResourceRecord.fromJson(const {
+      'id': 1,
+      'cover': 'uuid-1',
+      'cover.__media': [
+        {
+          'uuid': 'uuid-1',
+          'url': 'https://x/c.jpg',
+          'thumbUrl': 'https://x/t.jpg',
+        },
+      ],
+    }, 'id');
+
+    await tester.pumpWidget(
+      host(
+        Builder(
+          builder: (context) => EntryRegistry.defaults().build(
+            context,
+            parse(const {
+              'type': 'image_entry',
+              'name': 'cover',
+              'label': 'الغلاف',
+            }),
+            record,
+          ),
+        ),
+      ),
+    );
+
+    final tile = tester.widget<ImageEntryTile>(find.byType(ImageEntryTile));
+    expect(tile.url, 'https://x/t.jpg');
+  });
+
+  testWidgets('an image entry falls back to the raw string with no sibling', (
+    tester,
+  ) async {
+    final record = ResourceRecord.fromJson(const {
+      'id': 1,
+      'photo': 'https://x/raw.jpg',
+    }, 'id');
+
+    await tester.pumpWidget(
+      host(
+        Builder(
+          builder: (context) => EntryRegistry.defaults().build(
+            context,
+            parse(const {
+              'type': 'image_entry',
+              'name': 'photo',
+              'label': 'الصورة',
+            }),
+            record,
+          ),
+        ),
+      ),
+    );
+
+    final tile = tester.widget<ImageEntryTile>(find.byType(ImageEntryTile));
+    expect(tile.url, 'https://x/raw.jpg');
   });
 
   // Fix round 1, finding 2: `badge_entry` renders through `BadgeEntryTile` →

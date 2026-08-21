@@ -46,6 +46,7 @@ class FilamentStrings {
     this.seeAll = 'See all',
     this.relationEmpty = 'Nothing here yet',
     this.relationFailed = 'Could not load',
+    this.keepTypingToNarrowList = 'Keep typing to narrow the list',
   });
 
   final String retry;
@@ -178,6 +179,12 @@ class FilamentStrings {
   /// incident this guards against.
   final String relationFailed;
 
+  /// The footnote on a remote select's search sheet when the server said
+  /// the page it returned is not the whole list — says the list was cut
+  /// short rather than implying it ended, so a user who cannot find their
+  /// record keeps typing instead of concluding it does not exist.
+  final String keepTypingToNarrowList;
+
   static String _defaultMin(num bound) => 'Must be at least $bound';
   static String _defaultMax(num bound) => 'Must be at most $bound';
 
@@ -188,4 +195,81 @@ class FilamentStrings {
         (null, final max?) => 'Until $max',
         _ => '',
       };
+
+  /// A fully Arabic-translated instance — Modern Standard Arabic, matching
+  /// Flutter's own Material localisations where it has a canonical word
+  /// (Cancel = إلغاء, Delete = حذف, Save = حفظ, Retry = إعادة المحاولة,
+  /// Search = بحث).
+  ///
+  /// A factory, not a `const`: the parameterised strings are closures, and
+  /// a closure capturing its bound is not a compile-time constant. The
+  /// closures keep the `String Function(...)` shape the constructor
+  /// established — Arabic puts the bound where English cannot, so no fixed
+  /// `'%s'` template carries both.
+  factory FilamentStrings.arabic() => FilamentStrings(
+    retry: 'إعادة المحاولة',
+    empty: 'لا يوجد شيء هنا بعد',
+    dashboardEmpty: 'لا يوجد ما يمكن عرضه بعد.',
+    chartUnavailable: 'لم يتم توفير أداة عرض للرسوم البيانية.',
+    searchHint: 'بحث',
+    sortTitle: 'ترتيب حسب',
+    updateRequired: 'يُرجى تحديث التطبيق',
+    loadFailed: 'تعذّر التحميل',
+    fieldRequired: 'هذا الحقل مطلوب',
+    fieldEmail: 'أدخل عنوان بريد إلكتروني صالحًا',
+    fieldUrl: 'أدخل رابطًا صالحًا',
+    fieldPattern: 'هذه القيمة ليست بالتنسيق المتوقع',
+    fieldConfirmed: 'التأكيد غير متطابق',
+    fieldColor: 'أدخل لونًا صالحًا بالتنسيق المتوقع',
+    fieldMin: (bound) => 'يجب ألا تقل القيمة عن $bound',
+    fieldMax: (bound) => 'يجب ألا تزيد القيمة عن $bound',
+    timeFieldRange: (min, max) => switch ((min, max)) {
+      (final min?, final max?) => 'بين $min و$max',
+      (final min?, null) => 'من $min',
+      (null, final max?) => 'حتى $max',
+      _ => '',
+    },
+    save: 'حفظ',
+    saveFailed: 'تعذّر الحفظ',
+    deleteConfirmTitle: 'هل تريد حذف هذا السجل؟',
+    deleteConfirmBody: 'لا يمكن التراجع عن هذا الإجراء.',
+    deleteConfirm: 'حذف',
+    cancel: 'إلغاء',
+    create: 'إنشاء',
+    edit: 'تعديل',
+    actions: 'الإجراءات',
+    actionFailed: 'تعذّر تنفيذ هذا الإجراء.',
+    actionConfirm: 'تأكيد',
+    chooseFile: 'اختر ملفًا',
+    uploading: 'جارٍ الرفع…',
+    uploadFailed: 'تعذّر رفع الملف',
+    filePickerUnavailable: 'لم يتم توفير أداة اختيار الملفات.',
+    fileFieldReadOnly: 'لا يمكن تغيير هذا الملف.',
+    addItem: 'إضافة عنصر',
+    removeItem: 'إزالة',
+    repeaterReadOnly: 'لا يمكن تغيير هذه العناصر.',
+    tagHint: 'أضف علامة',
+    seeAll: 'عرض الكل',
+    relationEmpty: 'لا يوجد شيء هنا بعد',
+    relationFailed: 'تعذّر التحميل',
+    keepTypingToNarrowList: 'واصل الكتابة لتضييق القائمة',
+  );
+
+  /// The one resolver the common case needs: a locale in, strings out.
+  ///
+  /// Covers Arabic — the locale this package's RTL support already targets —
+  /// and nothing else. A host serving any other language still constructs
+  /// its own instance and passes it, exactly as before; this method exists
+  /// so the overwhelmingly common `panel.locale`-to-strings wiring is one
+  /// call rather than a hand-rolled switch in every host.
+  ///
+  /// Matching is a case-insensitive prefix check on `ar` (`ar`, `ar-SA`,
+  /// `AR` all resolve Arabic) because the translations are Modern Standard
+  /// Arabic, not a regional variant. Anything else — `en`, null, or a
+  /// language this package does not ship — falls back to the English
+  /// defaults rather than leaving a host with nothing.
+  static FilamentStrings forLocale(String? locale) =>
+      locale != null && locale.toLowerCase().startsWith('ar')
+      ? FilamentStrings.arabic()
+      : const FilamentStrings();
 }

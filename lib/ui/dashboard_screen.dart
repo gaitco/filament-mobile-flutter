@@ -42,6 +42,7 @@ class DashboardScreen extends StatefulWidget {
   const DashboardScreen({
     required this.provider,
     this.chartBuilder,
+    this.onStatTap,
     this.stateBuilder,
     this.strings = const FilamentStrings(),
     super.key,
@@ -49,6 +50,14 @@ class DashboardScreen extends StatefulWidget {
 
   final DashboardProvider provider;
   final DashboardChartBuilder? chartBuilder;
+
+  /// Called with a stat's [StatData.resourceKey] when its tile is tapped.
+  /// Navigation is the host's job, same division as every `onXTap` in this
+  /// package — and the same gate: a tile is tappable only when the server
+  /// published a target AND the host wired this. Either half missing renders
+  /// the plain tile, never one that ripples and silently no-ops.
+  final void Function(String resourceKey)? onStatTap;
+
   final PanelBodyBuilder? stateBuilder;
   final FilamentStrings strings;
 
@@ -167,29 +176,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
       widget.provider.data?.direction ?? PanelDirection.ltr,
     );
 
+    final resourceKey = stat.resourceKey;
+    final onStatTap = widget.onStatTap;
+
+    final tile = Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(stat.label, style: Theme.of(context).textTheme.bodySmall),
+          Text(
+            isolateBidi(stat.value, direction),
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
+          if (stat.description != null)
+            Text(isolateBidi(stat.description!, direction)),
+          if (stat.chart != null) ...[
+            const SizedBox(height: 8),
+            StatSparkline(values: stat.chart!, color: stat.color),
+          ],
+        ],
+      ),
+    );
+
     return SizedBox(
       width: 180,
       child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(stat.label, style: Theme.of(context).textTheme.bodySmall),
-              Text(
-                isolateBidi(stat.value, direction),
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              if (stat.description != null)
-                Text(isolateBidi(stat.description!, direction)),
-              if (stat.chart != null) ...[
-                const SizedBox(height: 8),
-                StatSparkline(values: stat.chart!, color: stat.color),
-              ],
-            ],
-          ),
-        ),
+        clipBehavior: Clip.antiAlias,
+        child: resourceKey != null && onStatTap != null
+            ? InkWell(
+                key: ValueKey('dashboard.stat.${stat.label}'),
+                onTap: () => onStatTap(resourceKey),
+                child: tile,
+              )
+            : tile,
       ),
     );
   }

@@ -150,6 +150,7 @@ class FakeSource implements ResourceDataSource {
 Widget dashboardHarness({
   FakeSource? source,
   DashboardChartBuilder? chartBuilder,
+  void Function(String resourceKey)? onStatTap,
 }) {
   final resolvedSource = source ?? FakeSource();
 
@@ -158,6 +159,7 @@ Widget dashboardHarness({
       body: DashboardScreen(
         provider: DashboardProvider(resolvedSource),
         chartBuilder: chartBuilder,
+        onStatTap: onStatTap,
       ),
     ),
   );
@@ -196,6 +198,47 @@ void main() {
 
       expect(find.text('Orders'), findsOneWidget);
       expect(find.text('1340'), findsOneWidget);
+    });
+
+    testWidgets('a stat with a resourceKey is tappable when the host wires '
+        'onStatTap, and inert otherwise', (tester) async {
+      DashboardData data() => DashboardData.fromJson(const {
+        'widgets': [
+          {
+            'type': 'stats',
+            'stats': [
+              {'label': 'Drafts', 'value': '124', 'resourceKey': 'articles'},
+              {'label': 'Plain', 'value': '7'},
+            ],
+          },
+        ],
+      });
+
+      // Both halves present: the targeted tile taps through, the target-less
+      // sibling stays inert.
+      String? tapped;
+      await tester.pumpWidget(
+        dashboardHarness(
+          source: FakeSource(dashboardData: data()),
+          onStatTap: (key) => tapped = key,
+        ),
+      );
+      await pumpUntilFound(tester, find.text('Drafts'));
+
+      await tester.tap(find.text('Drafts'));
+      expect(tapped, 'articles');
+      expect(find.byKey(const ValueKey('dashboard.stat.Plain')), findsNothing);
+
+      // Host never wired onStatTap: no tappable tile at all — never one
+      // that ripples and silently no-ops. The tree is reset first so the
+      // second screen mounts fresh — a same-position DashboardScreen would
+      // keep the old State and never load the new provider.
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(
+        dashboardHarness(source: FakeSource(dashboardData: data())),
+      );
+      await pumpUntilFound(tester, find.text('Drafts'));
+      expect(find.byKey(const ValueKey('dashboard.stat.Drafts')), findsNothing);
     });
 
     // Fix round 1, finding 4: outside the original brief's three named

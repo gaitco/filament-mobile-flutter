@@ -5,12 +5,14 @@ import 'package:flutter/foundation.dart';
 import '../data/options_page.dart';
 import '../data/relation_submit_target.dart';
 import '../data/resource_data_source.dart';
+import '../data/resource_record.dart';
 import '../data/upload_result.dart';
 import '../data/write_result.dart';
 import '../form/client_validator.dart';
 import '../form/form_values.dart';
 import '../ports/filament_strings.dart';
 import '../ports/filament_transport.dart';
+import '../schema/media_set.dart';
 import '../schema/resource_schema.dart';
 import '../schema/schema_component.dart';
 import 'load_status.dart';
@@ -77,6 +79,11 @@ class ResourceFormProvider extends ChangeNotifier {
   bool _submitting = false;
   bool _isUnauthenticated = false;
   Timer? _stateTimer;
+
+  /// The record [load] seeded the form from — null on create, since there is
+  /// nothing to seed from. Kept only for [mediaFor]; every other seeded
+  /// value already lives in [_values].
+  ResourceRecord? _record;
 
   /// One sequence per field, because two pickers can be searched independently
   /// and a shared counter would let either cancel the other.
@@ -146,6 +153,7 @@ class ResourceFormProvider extends ChangeNotifier {
 
       if (loadId != _loadId) return;
 
+      _record = record;
       _values = FormValues.initial(
         _components,
         from: record?.attributes ?? const {},
@@ -494,6 +502,14 @@ class ResourceFormProvider extends ChangeNotifier {
   /// The options last fetched for [field], empty until one arrives.
   List<SelectOption> optionsFor(String field) =>
       _optionsPages[field]?.options ?? const [];
+
+  /// The `'<field>.__media'` sibling for [name], read off the record this
+  /// form was seeded from. Null on create — there is no record — and null
+  /// when the field carries no such sibling; see [MediaSet.of].
+  MediaSet? mediaFor(String name) {
+    final record = _record;
+    return record == null ? null : MediaSet.of(record, name);
+  }
 
   Future<void> _refreshState(String changed) async {
     final stateId = ++_stateId;

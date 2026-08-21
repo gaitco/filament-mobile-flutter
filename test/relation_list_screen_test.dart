@@ -335,6 +335,50 @@ void main() {
     expect(find.text('Page two row'), findsOneWidget);
   });
 
+  testWidgets('fills a viewport page one leaves short by loading further pages '
+      'unprompted', (tester) async {
+    // Sibling to `ResourceListScreen`'s identical test — a short first
+    // page leaves nothing to scroll, so the scroll trigger alone strands
+    // the user on it.
+    final source = _Source(
+      pagesOfRows: [
+        [
+          {'id': 1, 'name': 'Sale'},
+        ],
+        [
+          {'id': 2, 'name': 'Clearance'},
+        ],
+      ],
+    );
+
+    await tester.pumpWidget(_screenFor(source));
+    await tester.pumpAndSettle();
+
+    expect(source.requestedPages, [1, 2]);
+    expect(find.text('Clearance'), findsOneWidget);
+  });
+
+  testWidgets('pull-to-refresh works on a list too short to scroll', (
+    tester,
+  ) async {
+    final source = _Source(
+      pagesOfRows: [
+        [
+          {'id': 1, 'name': 'Sale'},
+        ],
+      ],
+    );
+
+    await tester.pumpWidget(_screenFor(source));
+    await tester.pumpAndSettle();
+    expect(source.requestedPages, [1]);
+
+    await tester.fling(find.byType(ListView), const Offset(0, 300), 1000);
+    await tester.pumpAndSettle();
+
+    expect(source.requestedPages, [1, 1]);
+  });
+
   testWidgets('offers a retry when the next page fails, keeping page one', (
     tester,
   ) async {

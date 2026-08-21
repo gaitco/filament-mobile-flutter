@@ -40,6 +40,7 @@ sealed class SchemaComponent extends Equatable {
     this.disabled = false,
     this.writable = true,
     this.live = false,
+    this.translatable = false,
     this.rules = const ValidationRules.none(),
   });
 
@@ -55,6 +56,7 @@ sealed class SchemaComponent extends Equatable {
       disabled = common.disabled,
       writable = common.writable,
       live = common.live,
+      translatable = common.translatable,
       rules = common.rules;
 
   /// The raw contract discriminator, kept so an [UnknownComponent] can name
@@ -82,6 +84,14 @@ sealed class SchemaComponent extends Equatable {
   /// When true, a change to this field triggers a `/state` round-trip so the
   /// server can re-evaluate the schema.
   final bool live;
+
+  /// True only on a dotted leaf (`caption.ar`) whose head attribute
+  /// (`caption`) is translatable on the model — the `writable`/`placeholder`
+  /// precedent: published only when true, absent everywhere else, including
+  /// the undotted scalar sibling. The form screen groups every leaf sharing
+  /// a head-of-name into one field slot with locale chips instead of one
+  /// stacked field per locale; see `ResourceFormScreen`'s node walk.
+  final bool translatable;
 
   /// Client-side validation hints. A base-node property in the contract (§5.3),
   /// so every consumer can ask "is this required?" without switching over the
@@ -173,9 +183,11 @@ sealed class SchemaComponent extends Equatable {
   /// into the same `Set` or diff them against each other on this equality.
   /// `writable` is included: a `/state` round-trip can flip it on a field
   /// whose type and name are otherwise unchanged, and a rebuild that depends
-  /// on that difference needs the equality to see it.
+  /// on that difference needs the equality to see it. `translatable` is
+  /// included for the same reason `writable` is: it is what decides whether
+  /// this leaf renders inside a locale-chip group at all.
   @override
-  List<Object?> get props => [type, name, writable];
+  List<Object?> get props => [type, name, writable, translatable];
 }
 
 /// The properties every node shares, parsed once so each subclass constructor
@@ -191,6 +203,7 @@ class _CommonProperties {
     required this.disabled,
     required this.writable,
     required this.live,
+    required this.translatable,
     required this.rules,
   });
 
@@ -208,6 +221,7 @@ class _CommonProperties {
       disabled: opt<bool>(json, 'disabled') ?? false,
       writable: opt<bool>(json, 'writable') ?? true,
       live: opt<bool>(json, 'live') ?? false,
+      translatable: opt<bool>(json, 'translatable') ?? false,
       rules: ValidationRules.fromJson(
         opt<Map<String, dynamic>>(json, 'rules') ?? const {},
       ),
@@ -223,6 +237,7 @@ class _CommonProperties {
   final bool disabled;
   final bool writable;
   final bool live;
+  final bool translatable;
   final ValidationRules rules;
 }
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/resource_record.dart';
 import '../schema/card_layout.dart';
+import '../schema/media_set.dart';
 import 'bidi_text.dart';
 import 'semantic_badge.dart';
 
@@ -204,7 +205,14 @@ class _Leading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final url = record.get<String>(leading.field);
+    // A medialibrary-backed field's raw value is an opaque uuid token, not a
+    // URL — the flat `<field>.__media` sibling (design spec, "Wire shape")
+    // is where the resolved URL lives. No sibling (not a medialibrary field)
+    // falls back to the raw value exactly as before this task.
+    final media = MediaSet.of(record, leading.field);
+    final url = media != null && media.items.isNotEmpty
+        ? media.items.first.displayUrl
+        : record.get<String>(leading.field);
 
     // A media-library image serialises as null today (a known server-side gap).
     // Falling back silently is deliberate: an empty optional image must not

@@ -373,6 +373,37 @@ void main() {
     expect(find.text('صف 20'), findsOneWidget);
   });
 
+  testWidgets('fills a viewport page one leaves short by loading further pages '
+      'unprompted', (tester) async {
+    // Two rows per page cannot fill the test viewport, so the scroll
+    // trigger has nothing to fire on: an infinite-scroll list whose first
+    // page is short strands the user on it unless the screen fetches the
+    // next page itself.
+    final source = _Source(rows: 2, pages: 3);
+
+    await tester.pumpWidget(screenFor(source));
+    await tester.pumpAndSettle();
+
+    expect(source.requestedPages, [1, 2, 3]);
+    // The last row of page 3: rows are numbered from 0, two per page.
+    expect(find.text('صف 5'), findsOneWidget);
+  });
+
+  testWidgets('pull-to-refresh works on a list too short to scroll', (
+    tester,
+  ) async {
+    final source = _Source(rows: 2, pages: 1);
+
+    await tester.pumpWidget(screenFor(source));
+    await tester.pumpAndSettle();
+    expect(source.requestedPages, [1]);
+
+    await tester.fling(find.byType(ListView), const Offset(0, 300), 1000);
+    await tester.pumpAndSettle();
+
+    expect(source.requestedPages, [1, 1]);
+  });
+
   testWidgets('offers a retry when the next page fails, keeping page one', (
     tester,
   ) async {

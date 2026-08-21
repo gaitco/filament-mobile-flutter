@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../data/resource_record.dart';
+import '../schema/media_set.dart';
 import '../schema/rich_document.dart';
 import '../schema/schema_component.dart';
 import 'entries/entry_widgets.dart';
@@ -20,10 +21,12 @@ typedef EntryBuilder =
 /// about how that type behaves as a form field, which is `FieldRegistry`'s
 /// concern.
 class EntryRegistry {
-  EntryRegistry._(this._builders, {this.onLinkTap});
+  EntryRegistry._(this._builders, {this.onLinkTap, this.onRelatedTap});
 
-  factory EntryRegistry.defaults({void Function(String href)? onLinkTap}) =>
-      EntryRegistry._({}, onLinkTap: onLinkTap);
+  factory EntryRegistry.defaults({
+    void Function(String href)? onLinkTap,
+    void Function(String resourceKey, Object recordId)? onRelatedTap,
+  }) => EntryRegistry._({}, onLinkTap: onLinkTap, onRelatedTap: onRelatedTap);
 
   final Map<String, EntryBuilder> _builders;
 
@@ -34,6 +37,14 @@ class EntryRegistry {
   /// default) means no host has wired it; see `RichEntryTile`'s doc for what
   /// that renders.
   final void Function(String href)? onLinkTap;
+
+  /// Called with an entry's published target and the related record's id
+  /// when a targeted entry is tapped — `category.name` navigating to that
+  /// category. Same three-way gate as every affordance here: the server
+  /// published a target, the record carries the id, AND the host wired
+  /// this. Any half missing renders the plain entry, never one that
+  /// ripples and silently no-ops.
+  final void Function(String resourceKey, Object recordId)? onRelatedTap;
 
   void register(String type, EntryBuilder builder) {
     _builders[type] = builder;
@@ -67,15 +78,12 @@ class EntryRegistry {
         ? null
         : record.get<Object>(component.name!);
 
-    return switch (component.kind) {
+    final tile = switch (component.kind) {
       EntryKind.boolean => BooleanEntryTile(
         label: component.label,
         value: value == true,
       ),
-      EntryKind.image => ImageEntryTile(
-        label: component.label,
-        url: value is String ? value : null,
-      ),
+      EntryKind.image => _imageEntry(component, value, record),
       EntryKind.badge => BadgeEntryTile(
         label: component.label,
         value: value?.toString(),
@@ -87,6 +95,55 @@ class EntryRegistry {
         value: value?.toString(),
       ),
     };
+
+    return _relatedWrap(component, record, tile);
+  }
+
+  /// Wraps a targeted entry in a tap-through to its related record — see
+  /// [onRelatedTap] for the gate. The id is read off the record at the
+  /// path the server published beside the target; a payload missing it
+  /// (an older server, a null relation) renders the plain tile.
+  Widget _relatedWrap(
+    EntryComponent component,
+    ResourceRecord record,
+    Widget tile,
+  ) {
+    final onRelatedTap = this.onRelatedTap;
+    final resourceKey = component.targetResource;
+    final recordPath = component.targetRecordPath;
+    if (onRelatedTap == null || resourceKey == null || recordPath == null) {
+      return tile;
+    }
+
+    final recordId = record.get<Object>(recordPath);
+    if (recordId == null) return tile;
+
+    return InkWell(
+      key: ValueKey('entry.related.${component.name}'),
+      onTap: () => onRelatedTap(resourceKey, recordId),
+      child: tile,
+    );
+  }
+
+  /// `EntryKind.image` reads `<name>.__media` — the flat sibling a
+  /// medialibrary-backed field publishes beside its raw uuid token(s)
+  /// (design spec, "Wire shape") — and renders the first item's display URL.
+  /// No sibling (not a medialibrary field) falls back to the raw value as a
+  /// URL, exactly as before this task.
+  Widget _imageEntry(
+    EntryComponent component,
+    Object? value,
+    ResourceRecord record,
+  ) {
+    final name = component.name;
+    final media = name == null ? null : MediaSet.of(record, name);
+
+    return ImageEntryTile(
+      label: component.label,
+      url: media != null && media.items.isNotEmpty
+          ? media.items.first.displayUrl
+          : (value is String ? value : null),
+    );
   }
 
   /// `EntryKind.rich` reads `<name>.__rich` — the flat sibling

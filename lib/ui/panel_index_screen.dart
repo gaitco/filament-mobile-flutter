@@ -19,6 +19,7 @@ class PanelIndexScreen extends StatefulWidget {
   const PanelIndexScreen({
     required this.provider,
     required this.onResourceTap,
+    this.leading,
     this.stateBuilder,
     this.strings = const FilamentStrings(),
     super.key,
@@ -26,6 +27,14 @@ class PanelIndexScreen extends StatefulWidget {
 
   final PanelProvider provider;
   final void Function(ResourceSchema resource) onResourceTap;
+
+  /// Builds a row's leading widget — typically the icon the host's panel
+  /// shows for the same resource. The contract carries no icon of its own,
+  /// so the mapping is the host's: usually a switch on [ResourceSchema.key].
+  /// Null (or a null return for one resource) renders that row without a
+  /// leading slot, exactly as before this parameter existed.
+  final Widget? Function(ResourceSchema resource)? leading;
+
   final PanelBodyBuilder? stateBuilder;
   final FilamentStrings strings;
 
@@ -166,6 +175,7 @@ class _PanelIndexScreenState extends State<PanelIndexScreen> {
 
   Widget _tile(ResourceSchema resource) {
     return ListTile(
+      leading: widget.leading?.call(resource),
       title: Text(resource.labels.plural),
       // The glyph flips with the direction, not just its slot: `ListTile`
       // already moves `trailing` to the leading edge under RTL, but a

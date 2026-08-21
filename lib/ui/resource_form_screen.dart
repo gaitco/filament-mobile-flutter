@@ -102,8 +102,7 @@ class _ResourceFormScreenState extends State<ResourceFormScreen> {
       padding: const EdgeInsets.all(12),
       children: [
         if (provider.formError != null) _banner(context, provider.formError!),
-        for (final component in provider.components)
-          ..._buildNode(context, component),
+        ..._buildSiblings(context, provider.components),
         const SizedBox(height: 16),
         FilledButton(
           key: const ValueKey('form.submit'),
@@ -134,25 +133,142 @@ class _ResourceFormScreenState extends State<ResourceFormScreen> {
     );
   }
 
-  /// A hidden node — leaf field or container alike — renders nothing at all,
-  /// never merely a greyed-out control: the same subtree-wide gate
-  /// `writableFields` applies to the submission payload, applied here to what
-  /// reaches the screen.
-  List<Widget> _buildNode(BuildContext context, SchemaComponent component) {
-    if (component.hidden) return const [];
+  /// Builds one container's worth of children, in order. A hidden node —
+  /// leaf field or container alike — renders nothing at all, never merely a
+  /// greyed-out control: the same subtree-wide gate `writableFields` applies
+  /// to the submission payload, applied here to what reaches the screen.
+  ///
+  /// Grouping is scoped to THIS list: `translatable` leaves sharing a
+  /// head-of-name are siblings in the same form/section/grid the server
+  /// declared them in, so the pre-pass below only ever looks within one
+  /// recursive call, never across a container boundary.
+  List<Widget> _buildSiblings(
+    BuildContext context,
+    List<SchemaComponent> components,
+  ) {
+    final groups = _translatableGroups(components);
+    final rendered = <String>{};
+    final widgets = <Widget>[];
 
-    return switch (component) {
-      LayoutComponent(:final children) => [
-        for (final child in children) ..._buildNode(context, child),
-      ],
-      UnknownComponent(:final children) => [
-        for (final child in children) ..._buildNode(context, child),
-      ],
-      _ when component.name != null => [_field(context, component)],
-      // A component with no name holds no value — an infolist entry reaching
-      // a form screen, most likely — and there is nothing to render it as.
-      _ => const [],
-    };
+    for (final component in components) {
+      if (component.hidden) continue;
+
+      switch (component) {
+        case LayoutComponent(:final children):
+          widgets.addAll(_buildSiblings(context, children));
+        case UnknownComponent(:final children):
+          widgets.addAll(_buildSiblings(context, children));
+        case _ when component.name != null:
+          final head = component.translatable
+              ? _translatableHead(component.name!)
+              : null;
+          final members = head == null ? null : groups[head];
+          // A group of one member renders chipless, exactly like a plain
+          // field — the chip row only earns its place once there is
+          // something to switch between.
+          if (members != null && members.length > 1) {
+            if (rendered.add(head!)) {
+              widgets.add(_translatableGroup(context, head, members));
+            }
+          } else {
+            widgets.add(_field(context, component));
+          }
+        // A component with no name holds no value — an infolist entry
+        // reaching a form screen, most likely — and there is nothing to
+        // render it as.
+        default:
+          break;
+      }
+    }
+
+    return widgets;
+  }
+
+  /// Maps head-of-name (`caption`) to its members (`caption.ar`,
+  /// `caption.en`), among the leaves in [components] that are `translatable`
+  /// — never guessed at from a dotted name alone, since a non-translatable
+  /// dotted field (or a scalar sibling) must render exactly as it does
+  /// today.
+  Map<String, List<SchemaComponent>> _translatableGroups(
+    List<SchemaComponent> components,
+  ) {
+    final groups = <String, List<SchemaComponent>>{};
+    for (final component in components) {
+      if (component.hidden || !component.translatable) continue;
+      final name = component.name;
+      if (name == null) continue;
+      final head = _translatableHead(name);
+      if (head == null) continue;
+      groups.putIfAbsent(head, () => []).add(component);
+    }
+    return groups;
+  }
+
+  /// The name split at the LAST dot — the server publishes no second copy
+  /// of the attribute/locale split, so the client derives both halves from
+  /// the name it already has. Null for a name with no dot, which the
+  /// contract never actually sends alongside `translatable: true`.
+  String? _translatableHead(String name) {
+    final dot = name.lastIndexOf('.');
+    return dot <= 0 ? null : name.substring(0, dot);
+  }
+
+  /// One translatable attribute, rendered as a single field slot with a
+  /// locale-chip row above it. Every member stays a real field underneath —
+  /// [_field] is reused unmodified — so [FormValues] and the submission
+  /// payload carry every locale regardless of which chip is showing; see
+  /// the class-level non-goals on why that must never change.
+  Widget _translatableGroup(
+    BuildContext context,
+    String head,
+    List<SchemaComponent> members,
+  ) {
+    final provider = widget.provider;
+    final ordered = _orderByLocale(members, provider.resource.locales);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: _LocaleChipGroup(
+        key: ValueKey('group.$head'),
+        head: head,
+        label: _humanize(head),
+        members: ordered,
+        fieldBuilder: _field,
+        errorFor: (name) => provider.fieldErrors[name],
+      ),
+    );
+  }
+
+  /// `panel.locales` orders the chips when non-empty; a locale it does not
+  /// mention keeps its original position, appended after every locale it
+  /// does — appearance order, unchanged.
+  List<SchemaComponent> _orderByLocale(
+    List<SchemaComponent> members,
+    List<String> locales,
+  ) {
+    if (locales.isEmpty) return members;
+
+    final ordered = <SchemaComponent>[];
+    for (final locale in locales) {
+      for (final member in members) {
+        if (_localeOf(member) == locale) ordered.add(member);
+      }
+    }
+    for (final member in members) {
+      if (!ordered.contains(member)) ordered.add(member);
+    }
+    return ordered;
+  }
+
+  /// Group label = the humanized head attribute — what the scalar would be
+  /// called, replacing the per-locale "Ar"/"En" labels the member fields
+  /// carry today. No `intl` dependency: this only title-cases the
+  /// underscore-separated attribute name the server already sends.
+  String _humanize(String head) {
+    final words = head.split(RegExp('[._]')).where((word) => word.isNotEmpty);
+    return words
+        .map((word) => word[0].toUpperCase() + word.substring(1))
+        .join(' ');
   }
 
   Widget _field(BuildContext context, SchemaComponent component) {
@@ -186,9 +302,147 @@ class _ResourceFormScreenState extends State<ResourceFormScreen> {
           filePicker: widget.filePicker,
           uploadFile: ({required bytes, required filename}) =>
               provider.uploadFile(name, bytes: bytes, filename: filename),
+          media: provider.mediaFor(name),
           strings: widget.strings,
         ),
       ),
+    );
+  }
+}
+
+/// The locale half of a translatable leaf's name — everything after the
+/// LAST dot. Shared between the state's own ordering pass and
+/// [_LocaleChipGroupState], which needs it to label each chip.
+String _localeOf(SchemaComponent component) {
+  final name = component.name!;
+  return name.substring(name.lastIndexOf('.') + 1);
+}
+
+/// One translatable attribute's field slot: a row of locale chips above
+/// whichever member is currently selected. Selection is presentation-only —
+/// it decides which already-wired [_field] renders, never what
+/// [ResourceFormProvider] holds or submits.
+class _LocaleChipGroup extends StatefulWidget {
+  const _LocaleChipGroup({
+    required this.head,
+    required this.label,
+    required this.members,
+    required this.fieldBuilder,
+    required this.errorFor,
+    super.key,
+  });
+
+  final String head;
+  final String label;
+
+  /// Already ordered by the caller (`panel.locales`, else appearance).
+  final List<SchemaComponent> members;
+  final Widget Function(BuildContext, SchemaComponent) fieldBuilder;
+  final String? Function(String name) errorFor;
+
+  @override
+  State<_LocaleChipGroup> createState() => _LocaleChipGroupState();
+}
+
+class _LocaleChipGroupState extends State<_LocaleChipGroup> {
+  int _selected = 0;
+
+  /// The member names that carried an error the last time [_syncSelectionToError]
+  /// ran, joined into one comparable value; `null` before the first sync.
+  /// This whole widget rebuilds on every keystroke anywhere in the form (one
+  /// `ChangeNotifier` for the whole screen), not just an edit to one of THESE
+  /// members, so without this the force-switch below would reapply on every
+  /// unrelated rebuild instead of once per genuinely new error.
+  String? _lastSyncedErrorSignature;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncSelectionToError();
+  }
+
+  @override
+  void didUpdateWidget(covariant _LocaleChipGroup oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_selected >= widget.members.length) _selected = 0;
+    _syncSelectionToError();
+  }
+
+  /// An error keyed to a member that is not the visible one force-switches
+  /// the chip to it — the web plugin's own rule, because an error hiding
+  /// behind a chip is a save the user cannot see how to fix. Mutates the
+  /// field directly rather than through `setState`: both call sites
+  /// ([initState], [didUpdateWidget]) run before this frame's [build], so
+  /// the plain assignment is already picked up without an extra rebuild.
+  ///
+  /// Guarded twice over against this widget's own rebuild churn, which fires
+  /// far more often than the error set actually changes:
+  ///
+  ///  - it bails immediately when the error signature is unchanged since the
+  ///    last sync, so a user's deliberate tap to a clean chip survives every
+  ///    later rebuild while some OTHER member's error sits there untouched —
+  ///    the force-switch is a one-time reveal of a NEW error, not a standing
+  ///    rule reapplied every frame;
+  ///  - when the signature HAS changed, it still leaves the selection alone
+  ///    if the currently visible member already carries an error itself:
+  ///    that error is already on screen, nothing hidden needs revealing, and
+  ///    with two members erroring at once this is what stops them fighting
+  ///    over the chip instead of settling on whichever was visible first.
+  void _syncSelectionToError() {
+    final signature = _errorSignature();
+    if (signature == _lastSyncedErrorSignature) return;
+    _lastSyncedErrorSignature = signature;
+
+    final visible = widget.members[_selected].name;
+    if (visible != null && widget.errorFor(visible) != null) return;
+
+    for (var index = 0; index < widget.members.length; index++) {
+      if (index == _selected) continue;
+      final name = widget.members[index].name;
+      if (name != null && widget.errorFor(name) != null) {
+        _selected = index;
+        return;
+      }
+    }
+  }
+
+  /// Which members currently carry an error, in member order — the value
+  /// [_syncSelectionToError] compares against its last run. Names alone are
+  /// enough signal: two different error MESSAGES on the same name are still
+  /// just "this member has an error", which is all a force-switch cares
+  /// about. Joined on a NUL character, which a field name can never
+  /// contain, unlike a comma or dot either of which one legitimately could.
+  String _errorSignature() => [
+    for (final member in widget.members)
+      if (member.name != null && widget.errorFor(member.name!) != null)
+        member.name,
+  ].join('\u0000');
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(widget.label, style: Theme.of(context).textTheme.labelLarge),
+        const SizedBox(height: 4),
+        Wrap(
+          spacing: 8,
+          children: [
+            for (var index = 0; index < widget.members.length; index++)
+              ChoiceChip(
+                key: ValueKey(
+                  'locale-chip.${widget.head}.'
+                  '${_localeOf(widget.members[index])}',
+                ),
+                label: Text(_localeOf(widget.members[index]).toUpperCase()),
+                selected: index == _selected,
+                onSelected: (_) => setState(() => _selected = index),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        widget.fieldBuilder(context, widget.members[_selected]),
+      ],
     );
   }
 }

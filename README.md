@@ -84,6 +84,7 @@ and link handling — is in [`example/`](example).
 | [Toggle buttons](#toggle-buttons) | Chips — one choice or many, off `select`'s option shape |
 | [Slider](#slider) | Material `Slider` / `RangeSlider`, divisions from the published step |
 | [Tags](#tags) | Chips with a remove affordance, always a `List<String>` |
+| [Translatable](#translatable) | One field, locale chips — instead of a stacked field per locale |
 | [Key/value](#keyvalue) | Add/remove pairs, key and value cells gated independently |
 | [Colour](#colour) | A text field with a live swatch, in the panel's own format |
 | [Time and date bounds](#time-and-date-bounds) | `showTimePicker`, and the bounds a picker declares |
@@ -675,6 +676,73 @@ compiles and still runs.
 - **`splitKeys`, `tagPrefix` and `tagSuffix` are not on the wire.** A tag
   commits on submit only; this widget has no prefix/suffix presentation to
   reproduce.
+
+## Translatable
+
+*A `caption.ar`/`caption.en` pair renders as one field with locale chips,
+not two fields stacked under "Ar"/"En" labels.*
+
+`ResourceFormScreen`'s node walk groups every `translatable: true` leaf by
+the head of its dotted name (`caption.ar` and `caption.en` both group under
+`caption`) into a single field slot:
+
+- **Group label** is the humanized head attribute — `caption`, not the
+  useless per-locale label a stacked field used to carry.
+- **A chip row** sits above the field, one chip per locale, labelled with
+  the UPPERCASED locale code parsed off the tail of the field's own name
+  (no `intl` dependency). Chips order by `panel.locales` when the host
+  wired that list in and it is non-empty, else by the fields' own
+  appearance order.
+- **The chip only selects which member renders.** Every member's value
+  stays in `FormValues` regardless of which chip is selected, and the
+  submitted payload still carries every locale — submission logic does not
+  change at all, which is what keeps the server's merge guarantee true.
+- **A 422 keyed to a non-visible member force-switches the chip to it** —
+  the official web plugin's own rule. An error must never hide behind a
+  chip the user has not selected.
+- **A group of exactly one locale renders chipless**, exactly as a single
+  dotted field always has.
+- A non-translatable dotted field, and the scalar sibling beside a
+  translatable one, render exactly as they do today — the group only forms
+  around leaves the server actually marked `translatable`.
+
+### `panel.locales` reaches the form with no host wiring
+
+`ResourceSchema.locales` is populated by `PanelSchema.fromJson` at parse
+time, propagated down from the one `panel.locales` value into every
+resource the document carries — the same mechanism `ResourceSchema.direction`
+already uses (see RTL and i18n, below). `ResourceFormScreen` reads
+`widget.provider.resource.locales` straight off the resource its own
+provider already holds; there is no `locales` constructor parameter to
+wire up, and there never needs to be one. A directly-constructed
+`ResourceSchema`, as in a test, defaults to `const []` (appearance order).
+
+### Degradation, both directions
+
+- **Old server (no `translatable` annotation at all).** No group ever
+  forms — every dotted locale field renders as its own stacked field,
+  labelled by its own name, exactly as it does today. Nothing in the
+  parsing or the form screen changes behaviour for a document that never
+  publishes the key.
+- **New server, old client.** `SchemaComponent.translatable` is an
+  unrecognised JSON key to a client built before this feature, and is
+  simply never read — the fields still parse and render as ordinary
+  stacked dotted fields. The old client works unchanged against a new
+  server; it just does not get the chip grouping.
+
+### Known weaknesses, stated now
+
+- **No locale display names.** Chips show the raw locale code, uppercased
+  — `AR`, not "Arabic" — matching this package's stance of not taking an
+  `intl` dependency for this slice.
+- **Per-locale text direction inside the field is not modelled.** The
+  field renders in the panel's own direction (see RTL and i18n, below),
+  the same as every other field, regardless of which locale's chip is
+  selected.
+- **Editing an official-plugin field per locale is out of scope.** An
+  undotted field the plugin swaps by panel locale stays single-locale on
+  mobile; see the Laravel README's Translatable section and its `doctor`
+  diagnostic.
 
 ## Key/value
 
@@ -1488,12 +1556,10 @@ Known weaknesses, stated now:
 - **Text a host renders itself is not covered.** The isolate runs only
   where this package renders a server-supplied string; a host drawing its
   own widget from the same payload gets the raw, un-isolated string.
-- **This package's own `FilamentStrings` are not translated.** They are
-  host-supplied with English defaults by design (see Wiring, above) — a
-  host serving an Arabic panel supplies Arabic strings itself.
-- **Translatable-field editing is untouched.** A `caption.ar` key still
-  arrives as a flat sibling beside `caption`, exactly as it always has;
-  this slice never touches per-locale field editing.
+- **This package's own `FilamentStrings` ship in English and Arabic only.**
+  They are host-supplied with English defaults by design (see Wiring, above);
+  `FilamentStrings.arabic()` covers the Arabic case, and a host serving any
+  other language supplies its own strings.
 - **The isolate helper's idempotency guard is whole-string, not
   per-match.** A value that concatenated an already-isolated fragment with
   a fresh, un-isolated run would have the fresh run skipped too — see the
@@ -1549,3 +1615,23 @@ submission**: when a required field is empty the request never leaves the
 phone, so the server's already-translated 422 never arrives and English is the
 only thing the user ever sees. Measured on the pilot panel — an Arabic-locale
 Filament panel with 33 production resources.
+
+**Arabic ships with the package.** `FilamentStrings.arabic()` returns every
+field above in Modern Standard Arabic, matching Flutter's own Material
+localisations where it has a canonical word (Cancel = إلغاء, Delete = حذف,
+Save = حفظ, Retry = إعادة المحاولة, Search = بحث) — including the
+parameterised closures, with each bound placed where Arabic word order wants
+it. It is a factory, not a `const`: a closure capturing its bound is not a
+compile-time constant, so the one call site per screen pays a small
+allocation instead of gaining a second, subtly different, strings type.
+
+For the common case the wiring is one call: `FilamentStrings.forLocale`
+takes a locale tag — typically `panel.locale`, already in hand wherever a
+screen is built — and returns the Arabic instance for any `ar*` tag
+(case-insensitive: `ar`, `ar-SA`, `AR` alike, since the translations are
+Modern Standard, not a regional variant) and the English defaults for
+anything else, including null. Hosts serving other languages are unaffected:
+they construct and pass their own `FilamentStrings`, exactly as before —
+`forLocale` is a convenience, not a registry this package means to grow. The
+companion `filament_mobile_charts` package mirrors both members on
+`FilamentChartStrings`, for its two fallback messages.

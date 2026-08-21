@@ -38,6 +38,13 @@ const _screen = String.fromEnvironment('DEMO_SCREEN', defaultValue: 'index');
 /// host can set the initial offset from outside.
 const _scrollOffset = int.fromEnvironment('DEMO_SCROLL');
 
+/// The fixture's locale, mirrored from `demo_transport.dart`'s private
+/// `_demoLocale`: its schema publishes `ar` under RTL (the default) and `en`
+/// otherwise, and the strings the demo passes should say the same thing the
+/// server does. Derived from the same public [demoDirection] rather than
+/// duplicating the fixture's `locale:` line.
+const _stringsLocale = demoDirection == 'rtl' ? 'ar' : 'en';
+
 class DemoApp extends StatelessWidget {
   const DemoApp({super.key});
 
@@ -96,10 +103,14 @@ class _DemoHomeState extends State<_DemoHome> {
     // needs rather than the shortcut.
     if (_screen == 'dashboard') {
       return Scaffold(
-        appBar: AppBar(title: const Text('Dashboard')),
+        appBar: AppBar(
+          title: Text(_stringsLocale == 'ar' ? 'لوحة التحكم' : 'Dashboard'),
+        ),
         body: DashboardScreen(
           provider: _dashboard,
-          chartBuilder: flChartBuilder(),
+          chartBuilder: flChartBuilder(
+            strings: FilamentChartStrings.forLocale(_stringsLocale),
+          ),
         ),
       );
     }
@@ -139,6 +150,7 @@ class _DemoHomeState extends State<_DemoHome> {
 
   Widget _index() => PanelIndexScreen(
     provider: _panel,
+    strings: FilamentStrings.forLocale(_stringsLocale),
     // `_panel.panel` is non-null by the time a resource can be tapped — the
     // index cannot render a row until the schema it lists has loaded.
     onResourceTap: (resource) => Navigator.of(context).push(
@@ -149,6 +161,7 @@ class _DemoHomeState extends State<_DemoHome> {
   Widget _list(PanelSchema? panel, ResourceSchema resource) =>
       ResourceListScreen(
         provider: ResourceListProvider(source: _source, resource: resource),
+        strings: FilamentStrings.forLocale(_stringsLocale),
         onRecordTap: (record) => Navigator.of(context).push(
           MaterialPageRoute(
             builder: (context) => _view(panel, resource, record),
@@ -169,6 +182,7 @@ class _DemoHomeState extends State<_DemoHome> {
           resource: resource,
           id: id,
         ),
+        strings: FilamentStrings.forLocale(_stringsLocale),
         // `onLinkTap` makes a rich-text link tappable — this package takes
         // no URL-launcher dependency, so opening it is entirely the host's
         // call. This demo has no such dependency either, so it echoes the
@@ -226,6 +240,7 @@ class _DemoHomeState extends State<_DemoHome> {
       id: recordId,
       relation: relation,
     ),
+    strings: FilamentStrings.forLocale(_stringsLocale),
     // Threaded in rather than read off `_panel`: only the index path loads
     // that provider, so a direct `DEMO_SCREEN=relations` boot would have found
     // it null and rendered the list with no affordances at all — the one thing
@@ -241,9 +256,10 @@ class _DemoHomeState extends State<_DemoHome> {
       provider: ResourceFormProvider(
         source: _source,
         resource: resource,
-        strings: const FilamentStrings(),
+        strings: FilamentStrings.forLocale(_stringsLocale),
         recordId: recordId ?? 1,
       ),
+      strings: FilamentStrings.forLocale(_stringsLocale),
       filePicker: _pickFile,
     );
 

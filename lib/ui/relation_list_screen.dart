@@ -82,6 +82,10 @@ class _RelationListScreenState extends State<RelationListScreen> {
   void initState() {
     super.initState();
     _scroll.addListener(_onScroll);
+    // On the provider, not in build() — same reasoning as
+    // ResourceListScreen: rebuilds happen inside the body's
+    // ListenableBuilder, so build() runs once, against the skeleton.
+    widget.provider.addListener(_scheduleFillCheck);
     // Only an untouched provider is loaded — same reasoning as
     // ResourceListScreen: a host-owned provider that already fetched keeps
     // its rows across a re-mount.
@@ -93,16 +97,30 @@ class _RelationListScreenState extends State<RelationListScreen> {
   @override
   void dispose() {
     _searchTimer?.cancel();
+    widget.provider.removeListener(_scheduleFillCheck);
     _scroll
       ..removeListener(_onScroll)
       ..dispose();
     super.dispose();
   }
 
+  void _scheduleFillCheck() {
+    WidgetsBinding.instance.addPostFrameCallback(_fillShortViewport);
+  }
+
   void _onScroll() {
     if (_scroll.position.pixels >= _scroll.position.maxScrollExtent * 0.8) {
       widget.provider.loadMore();
     }
+  }
+
+  /// Sibling of `ResourceListScreen._fillShortViewport`, for the same reason:
+  /// a first page shorter than the viewport leaves nothing to scroll, so the
+  /// scroll trigger alone strands the user on it.
+  void _fillShortViewport(Duration _) {
+    if (!mounted || !_scroll.hasClients) return;
+    if (_scroll.position.maxScrollExtent > 0) return;
+    widget.provider.loadMore();
   }
 
   /// Debouncing lives here rather than in the provider — the same division

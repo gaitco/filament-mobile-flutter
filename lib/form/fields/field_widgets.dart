@@ -7,6 +7,7 @@ import '../../data/options_page.dart';
 import '../../ports/filament_file_picker.dart';
 import '../../ports/filament_strings.dart';
 
+import '../../schema/media_set.dart';
 import '../../schema/schema_component.dart';
 import '../field_registry.dart';
 import '../field_state.dart';
@@ -925,11 +926,18 @@ class FileFieldWidget extends StatefulWidget {
   const FileFieldWidget({
     required this.component,
     required this.state,
+    this.media,
     super.key,
   });
 
   final FileComponent component;
   final FieldState state;
+
+  /// The record's resolved media for this field — null on create, and null
+  /// for a field the record carries no `'<name>.__media'` sibling for. A
+  /// stored value matching one of these items by `uuid` displays that
+  /// item's name and thumbnail instead of the raw token; see [_displayName].
+  final MediaSet? media;
 
   @override
   State<FileFieldWidget> createState() => _FileFieldWidgetState();
@@ -961,7 +969,7 @@ class _FileFieldWidgetState extends State<FileFieldWidget> {
       mainAxisSize: MainAxisSize.min,
       children: [
         _TextControl(
-          value: value == null ? null : _basename(value),
+          value: value == null ? null : _displayName(value),
           enabled: false,
           readOnly: true,
           decoration: InputDecoration(
@@ -1011,9 +1019,13 @@ class _FileFieldWidgetState extends State<FileFieldWidget> {
         for (var index = 0; index < paths.length; index++)
           Row(
             children: [
+              if (_thumbnailFor(paths[index]) case final thumbnail?) ...[
+                thumbnail,
+                const SizedBox(width: 8),
+              ],
               Expanded(
                 child: Text(
-                  _basename(paths[index]),
+                  _displayName(paths[index]),
                   key: ValueKey('file.$name.item.$index'),
                 ),
               ),
@@ -1109,6 +1121,44 @@ class _FileFieldWidgetState extends State<FileFieldWidget> {
   String _basename(String path) {
     final index = path.lastIndexOf('/');
     return index == -1 ? path : path.substring(index + 1);
+  }
+
+  /// [token] is a stored path or a media uuid — an opaque string the value
+  /// carries either way. One matching [widget.media] by `uuid` renders that
+  /// item's own `name` (falling back to [_basename] itself when the item
+  /// carries none); anything else — a plain stored path, or a media-backed
+  /// field the record's `__media` sibling could not resolve — falls back to
+  /// [_basename], today's behaviour unchanged.
+  String _displayName(String token) =>
+      _mediaItemFor(token)?.name ?? _basename(token);
+
+  MediaItem? _mediaItemFor(String token) {
+    for (final item in widget.media?.items ?? const <MediaItem>[]) {
+      if (item.uuid == token) return item;
+    }
+    return null;
+  }
+
+  /// A 24×24 leading thumbnail for a multiple row's matched media item, when
+  /// it resolved a [MediaItem.displayUrl] — null for a plain stored path, an
+  /// unmatched token, or a matched item with no url to show. A broken image
+  /// (a stale thumbnail conversion, a network hiccup) degrades to nothing
+  /// rather than Flutter's default broken-image icon — the same
+  /// never-crash-never-ugly rule the rest of this field follows.
+  Widget? _thumbnailFor(String token) {
+    final url = _mediaItemFor(token)?.displayUrl;
+    if (url == null) return null;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(4),
+      child: Image.network(
+        url,
+        width: 24,
+        height: 24,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+      ),
+    );
   }
 }
 
@@ -1818,6 +1868,7 @@ class RemoteSelectField extends StatelessWidget {
         child: _RemoteSearchSheet(
           label: component.label,
           search: state.searchOptions!,
+          strings: state.strings,
         ),
       ),
     );
@@ -1827,10 +1878,20 @@ class RemoteSelectField extends StatelessWidget {
 }
 
 class _RemoteSearchSheet extends StatefulWidget {
-  const _RemoteSearchSheet({required this.label, required this.search});
+  const _RemoteSearchSheet({
+    required this.label,
+    required this.search,
+    required this.strings,
+  });
 
   final String? label;
   final Future<OptionsPage> Function(String query) search;
+
+  /// Threaded in from the field's [FieldState], the same path every other
+  /// field widget reads its strings through — the sheet is pushed as a
+  /// route, but routes carry constructor arguments fine, so no ambient
+  /// lookup is needed.
+  final FilamentStrings strings;
 
   @override
   State<_RemoteSearchSheet> createState() => _RemoteSearchSheetState();
@@ -1900,10 +1961,10 @@ class _RemoteSearchSheetState extends State<_RemoteSearchSheet> {
                   // a user who cannot find their record otherwise concludes it
                   // does not exist.
                   if (_page.hasMore)
-                    const ListTile(
-                      key: ValueKey('options.hasMore'),
+                    ListTile(
+                      key: const ValueKey('options.hasMore'),
                       dense: true,
-                      title: Text('Keep typing to narrow the list'),
+                      title: Text(widget.strings.keepTypingToNarrowList),
                     ),
                 ],
               ),

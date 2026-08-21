@@ -3,6 +3,9 @@ import 'package:filament_mobile_example/demo_transport.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  // `String.fromEnvironment('DEMO_DIR')` is compile-time, and `flutter test`
+  // passes no dart-define — so every assertion below on a fixture string is
+  // against the fixture's default locale: an Arabic, right-to-left panel.
   test('demo schema parses into two groups and five resources', () async {
     final source = RestResourceDataSource(transport: DemoTransport());
     final panel = await source.panel();
@@ -13,7 +16,7 @@ void main() {
     // through its parent has no business as a top-level index entry. The two
     // counts disagreeing is the point, so both are asserted.
     expect(panel.resources, hasLength(5));
-    expect(panel.navigation.map((g) => g.group), ['Shop', 'People']);
+    expect(panel.navigation.map((g) => g.group), ['المتجر', 'الأشخاص']);
     expect(panel.resource('reviews'), isNotNull);
     expect(
       panel.navigation.expand((g) => g.resources),
@@ -53,6 +56,46 @@ void main() {
           'whose dashboard answers ltr renders one screen the wrong way '
           'round',
     );
+  });
+
+  test('list honours sort, direction and search', () async {
+    final source = RestResourceDataSource(transport: DemoTransport());
+
+    final byName = await source.list('products', sort: 'name');
+    final names = byName.records.map((r) => r.get<String>('name')).toList();
+    expect(names, [...names]..sort(), reason: '?sort=name must reorder rows');
+
+    final newest = await source.list(
+      'products',
+      sort: 'updated_at',
+      direction: 'desc',
+    );
+    final dates = newest.records
+        .map((r) => r.get<String>('updated_at')!)
+        .toList();
+    expect(dates, [...dates]..sort((a, b) => b.compareTo(a)));
+
+    final searched = await source.list('products', search: 'أورورا');
+    expect(searched.records.map((r) => r.get<String>('name')), [
+      'مصباح أورورا المكتبي',
+    ]);
+  });
+
+  test('products list paginates, and pages continue the same sort', () async {
+    final source = RestResourceDataSource(transport: DemoTransport());
+
+    final first = await source.list('products', sort: 'name');
+    expect(first.meta.lastPage, greaterThan(1));
+    expect(first.records, hasLength(first.meta.perPage));
+    expect(first.meta.hasMore, isTrue);
+
+    final second = await source.list('products', page: 2, sort: 'name');
+    final names = [
+      ...first.records,
+      ...second.records,
+    ].map((r) => r.get<String>('name')).toList();
+    expect(names, [...names]..sort(), reason: 'page 2 continues the order');
+    expect(names.toSet(), hasLength(names.length), reason: 'no row repeats');
   });
 
   test('uploadFile returns a fake stored path under the filename', () async {

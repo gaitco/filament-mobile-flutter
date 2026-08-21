@@ -206,5 +206,114 @@ void main() {
         expect(strings.loadFailed, 'تعذّر التحميل');
       },
     );
+
+    test('arabic() translates every field and differs from the defaults', () {
+      final strings = FilamentStrings.arabic();
+      const defaults = FilamentStrings();
+
+      // Plain fields: non-empty, and not the English they replaced.
+      final plain = <String, (String, String)>{
+        'retry': (strings.retry, defaults.retry),
+        'empty': (strings.empty, defaults.empty),
+        'dashboardEmpty': (strings.dashboardEmpty, defaults.dashboardEmpty),
+        'chartUnavailable': (
+          strings.chartUnavailable,
+          defaults.chartUnavailable,
+        ),
+        'searchHint': (strings.searchHint, defaults.searchHint),
+        'sortTitle': (strings.sortTitle, defaults.sortTitle),
+        'updateRequired': (strings.updateRequired, defaults.updateRequired),
+        'loadFailed': (strings.loadFailed, defaults.loadFailed),
+        'fieldRequired': (strings.fieldRequired, defaults.fieldRequired),
+        'fieldEmail': (strings.fieldEmail, defaults.fieldEmail),
+        'fieldUrl': (strings.fieldUrl, defaults.fieldUrl),
+        'fieldPattern': (strings.fieldPattern, defaults.fieldPattern),
+        'fieldConfirmed': (strings.fieldConfirmed, defaults.fieldConfirmed),
+        'fieldColor': (strings.fieldColor, defaults.fieldColor),
+        'save': (strings.save, defaults.save),
+        'saveFailed': (strings.saveFailed, defaults.saveFailed),
+        'deleteConfirmTitle': (
+          strings.deleteConfirmTitle,
+          defaults.deleteConfirmTitle,
+        ),
+        'deleteConfirmBody': (
+          strings.deleteConfirmBody,
+          defaults.deleteConfirmBody,
+        ),
+        'deleteConfirm': (strings.deleteConfirm, defaults.deleteConfirm),
+        'cancel': (strings.cancel, defaults.cancel),
+        'create': (strings.create, defaults.create),
+        'edit': (strings.edit, defaults.edit),
+        'actions': (strings.actions, defaults.actions),
+        'actionFailed': (strings.actionFailed, defaults.actionFailed),
+        'actionConfirm': (strings.actionConfirm, defaults.actionConfirm),
+        'chooseFile': (strings.chooseFile, defaults.chooseFile),
+        'uploading': (strings.uploading, defaults.uploading),
+        'uploadFailed': (strings.uploadFailed, defaults.uploadFailed),
+        'filePickerUnavailable': (
+          strings.filePickerUnavailable,
+          defaults.filePickerUnavailable,
+        ),
+        'fileFieldReadOnly': (
+          strings.fileFieldReadOnly,
+          defaults.fileFieldReadOnly,
+        ),
+        'addItem': (strings.addItem, defaults.addItem),
+        'removeItem': (strings.removeItem, defaults.removeItem),
+        'repeaterReadOnly': (
+          strings.repeaterReadOnly,
+          defaults.repeaterReadOnly,
+        ),
+        'tagHint': (strings.tagHint, defaults.tagHint),
+        'seeAll': (strings.seeAll, defaults.seeAll),
+        'relationEmpty': (strings.relationEmpty, defaults.relationEmpty),
+        'relationFailed': (strings.relationFailed, defaults.relationFailed),
+        'keepTypingToNarrowList': (
+          strings.keepTypingToNarrowList,
+          defaults.keepTypingToNarrowList,
+        ),
+      };
+      for (final entry in plain.entries) {
+        expect(
+          entry.value.$1,
+          isNotEmpty,
+          reason: '${entry.key} must be translated',
+        );
+        expect(
+          entry.value.$1,
+          isNot(entry.value.$2),
+          reason: '${entry.key} still has its English default',
+        );
+      }
+
+      // The parameterised closures: bound placed in the Arabic sentence, and
+      // every null combination answered.
+      expect(strings.fieldMin(5), 'يجب ألا تقل القيمة عن 5');
+      expect(strings.fieldMax(5), 'يجب ألا تزيد القيمة عن 5');
+      expect(strings.timeFieldRange('9:00', '17:00'), 'بين 9:00 و17:00');
+      expect(strings.timeFieldRange('9:00', null), 'من 9:00');
+      expect(strings.timeFieldRange(null, '17:00'), 'حتى 17:00');
+      expect(strings.timeFieldRange(null, null), isEmpty);
+    });
+
+    test('forLocale resolves Arabic for any `ar*` locale tag', () {
+      for (final locale in ['ar', 'ar-SA', 'AR', 'ar_EG']) {
+        expect(
+          FilamentStrings.forLocale(locale).save,
+          'حفظ',
+          reason: '$locale should resolve Arabic',
+        );
+      }
+    });
+
+    test('forLocale falls back to the English defaults otherwise', () {
+      for (final locale in ['en', 'en-GB', 'fr', null]) {
+        expect(
+          FilamentStrings.forLocale(locale).save,
+          'Save',
+          reason: '$locale should keep the defaults',
+        );
+      }
+    });
   });
 }

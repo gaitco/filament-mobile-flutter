@@ -284,6 +284,48 @@ void main() {
       expect(find.text('docs/a.pdf'), findsNothing);
     });
 
+    testWidgets('a media-backed value renders its file name, not the uuid', (
+      tester,
+    ) async {
+      final source = FakeSource(
+        components: multiFileForm(),
+        record: const ResourceRecord(
+          id: 7,
+          attributes: {
+            'attachments': ['uuid-1'],
+            'attachments.__media': [
+              {
+                'uuid': 'uuid-1',
+                'url': 'https://example.test/original.jpg',
+                'name': 'photo.jpg',
+              },
+            ],
+          },
+        ),
+      );
+      await pumpMultiple(tester, source, recordId: 7);
+      await pumpUntilFound(tester, find.text('photo.jpg'));
+
+      expect(find.text('photo.jpg'), findsOneWidget);
+      expect(find.text('uuid-1'), findsNothing);
+    });
+
+    testWidgets('an absent media set falls back to basename', (tester) async {
+      final source = FakeSource(
+        components: multiFileForm(),
+        record: const ResourceRecord(
+          id: 7,
+          attributes: {
+            'attachments': ['uploads/abc.png'],
+          },
+        ),
+      );
+      await pumpMultiple(tester, source, recordId: 7);
+      await pumpUntilFound(tester, find.text('abc.png'));
+
+      expect(find.text('abc.png'), findsOneWidget);
+    });
+
     testWidgets('removing an item drops it and leaves its siblings', (
       tester,
     ) async {

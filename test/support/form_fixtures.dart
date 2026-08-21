@@ -386,19 +386,26 @@ SchemaComponent? findComponent(List<SchemaComponent> components, String name) {
   return null;
 }
 
-ResourceSchema schemaFor(List<SchemaComponent> form) => ResourceSchema(
+ResourceSchema schemaFor(
+  List<SchemaComponent> form, {
+  List<String> locales = const [],
+}) => ResourceSchema(
   key: 'banners',
   labels: const ResourceLabels(singular: 'Banner', plural: 'Banners'),
   form: form,
+  locales: locales,
 );
 
-ResourceFormProvider providerFor(FakeSource source, {Object? recordId}) =>
-    ResourceFormProvider(
-      source: source,
-      resource: schemaFor(source.components),
-      strings: const FilamentStrings(),
-      recordId: recordId,
-    );
+ResourceFormProvider providerFor(
+  FakeSource source, {
+  Object? recordId,
+  List<String> locales = const [],
+}) => ResourceFormProvider(
+  source: source,
+  resource: schemaFor(source.components, locales: locales),
+  strings: const FilamentStrings(),
+  recordId: recordId,
+);
 
 /// An editable repeater whose item template holds a scalar child and a NESTED
 /// repeater — the shape the server publishes as `outer readOnly: false`,

@@ -101,6 +101,37 @@ void main() {
       );
     });
 
+    test('parses translatable, defaulting to false when absent', () {
+      final absent = SchemaComponent.fromJson(const {
+        'type': 'text',
+        'name': 'caption',
+      }, 'f[0]');
+      final present = SchemaComponent.fromJson(const {
+        'type': 'text',
+        'name': 'caption.ar',
+        'translatable': true,
+      }, 'f[0]');
+
+      expect(absent.translatable, isFalse);
+      expect(present.translatable, isTrue);
+    });
+
+    test('translatable participates in equality', () {
+      expect(
+        SchemaComponent.fromJson(const {
+          'type': 'text',
+          'name': 'caption.ar',
+        }, 'f'),
+        isNot(
+          SchemaComponent.fromJson(const {
+            'type': 'text',
+            'name': 'caption.ar',
+            'translatable': true,
+          }, 'f'),
+        ),
+      );
+    });
+
     test('throws with the path when type is missing', () {
       expect(
         () => SchemaComponent.fromJson(const {'name': 'x'}, 'form[3]'),

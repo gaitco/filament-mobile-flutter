@@ -154,6 +154,7 @@ Widget indexHarness({
   List<String> resources = const [],
   Map<String, String> groups = const {},
   void Function(ResourceSchema)? onResourceTap,
+  Widget? Function(ResourceSchema)? leading,
   Object? error,
   TextDirection direction = TextDirection.ltr,
 }) {
@@ -165,6 +166,7 @@ Widget indexHarness({
           _Source(resources: resources, groups: groups, error: error),
         ),
         onResourceTap: onResourceTap ?? (_) {},
+        leading: leading,
       ),
     ),
   );
@@ -207,6 +209,28 @@ void main() {
     await pumpUntilFound(tester, find.byType(ListTile));
 
     expect(find.byType(ListTile), findsNWidgets(2));
+  });
+
+  testWidgets('a leading builder renders per resource, null renders none', (
+    tester,
+  ) async {
+    // The contract carries no icon, so the mapping is the host's — and a
+    // resource the host has no icon for must render exactly as it did
+    // before the parameter existed, not with an empty leading slot.
+    await tester.pumpWidget(
+      indexHarness(
+        resources: ['banners', 'posts'],
+        leading: (resource) =>
+            resource.key == 'banners' ? const Icon(Icons.flag) : null,
+      ),
+    );
+    await pumpUntilFound(tester, find.byType(ListTile));
+
+    expect(find.byIcon(Icons.flag), findsOneWidget);
+    final postsTile = tester.widget<ListTile>(
+      find.ancestor(of: find.text('posts'), matching: find.byType(ListTile)),
+    );
+    expect(postsTile.leading, isNull);
   });
 
   testWidgets('an empty panel is an explicit state, never a spinner', (

@@ -94,6 +94,10 @@ class PaginatedCardList extends StatelessWidget {
       onRefresh: onRefresh,
       child: ListView.builder(
         controller: controller,
+        // A list shorter than its viewport is otherwise not scrollable at
+        // all, which makes the RefreshIndicator above impossible to pull —
+        // refresh must work on a one-row list too.
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(8),
         itemCount: records.length + (isLoadingMore || loadMoreFailed ? 1 : 0),
         itemBuilder: (context, index) {

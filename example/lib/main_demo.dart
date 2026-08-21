@@ -109,12 +109,10 @@ class _DemoHomeState extends State<_DemoHome> {
         body: DashboardScreen(
           provider: _dashboard,
           chartBuilder: flChartBuilder(
-            // Not forLocale(): the example resolves the charts package from pub.dev,
-            // and a release publishes the core before charts — so the example may
-            // only use API already live on pub.dev (forLocale ships in 0.1.5).
-            strings: _stringsLocale == 'ar'
-                ? FilamentChartStrings.arabic()
-                : const FilamentChartStrings(),
+            // Defaults only: the example resolves the charts package from pub.dev
+            // and a release publishes the core before charts, so it may use only
+            // API already live there — forLocale()/arabic() ship in 0.1.5.
+            strings: const FilamentChartStrings(),
           ),
         ),
       );

@@ -39,17 +39,16 @@ import 'load_status.dart';
 /// and a screen debouncing every keystroke would defeat the point of `live`.
 class ResourceFormProvider extends ChangeNotifier {
   ResourceFormProvider({
-    required ResourceDataSource source,
+    required this.source,
     required this.resource,
     required this.strings,
     this.recordId,
     this.submitTarget,
     this.stateDebounce = const Duration(milliseconds: 400),
-  }) : _source = source,
-       _components = resource.form,
+  }) : _components = resource.form,
        _values = FormValues.initial(resource.form);
 
-  final ResourceDataSource _source;
+  final ResourceDataSource source;
   final ResourceSchema resource;
   final FilamentStrings strings;
 
@@ -97,7 +96,7 @@ class ResourceFormProvider extends ChangeNotifier {
   /// writes [_components], a load writes [_values] and [_status].
   ///
   /// Sharing one counter deadlocks the edit path: a debounce firing during
-  /// `load()`'s `await _source.record(...)` would bump the shared id, and
+  /// `load()`'s `await source.record(...)` would bump the shared id, and
   /// load's own guard would then discard load's own result — [_status] stuck
   /// on `loading` forever, an infinite spinner over a form that never seeds.
   /// [load] bumps *both* (superseding a `/state`), [_refreshState] bumps only
@@ -155,7 +154,7 @@ class ResourceFormProvider extends ChangeNotifier {
     try {
       final record = recordId == null
           ? null
-          : await _source.record(resource.key, recordId!);
+          : await source.record(resource.key, recordId!);
 
       if (loadId != _loadId) return;
 
@@ -240,7 +239,7 @@ class ResourceFormProvider extends ChangeNotifier {
     required List<int> bytes,
     required String filename,
   }) async {
-    final result = await _source.uploadFile(
+    final result = await source.uploadFile(
       resource.key,
       name,
       bytes: bytes,
@@ -327,16 +326,16 @@ class ResourceFormProvider extends ChangeNotifier {
       // write's 422 by the same child-form field names this screen renders.
       result = target == null
           ? recordId == null
-                ? await _source.create(resource.key, payload)
-                : await _source.update(resource.key, recordId!, payload)
+                ? await source.create(resource.key, payload)
+                : await source.update(resource.key, recordId!, payload)
           : recordId == null
-          ? await _source.createRelation(
+          ? await source.createRelation(
               target.resourceKey,
               target.recordId,
               target.relation,
               payload,
             )
-          : await _source.updateRelation(
+          : await source.updateRelation(
               target.resourceKey,
               target.recordId,
               target.relation,
@@ -480,7 +479,7 @@ class ResourceFormProvider extends ChangeNotifier {
     _optionsId[field] = id;
 
     try {
-      final page = await _source.options(
+      final page = await source.options(
         resource.key,
         field: field,
         recordId: recordId,
@@ -522,7 +521,7 @@ class ResourceFormProvider extends ChangeNotifier {
     final stateId = ++_stateId;
 
     try {
-      final components = await _source.state(
+      final components = await source.state(
         resource.key,
         recordId: recordId,
         // The same payload a write would send, so the form is re-evaluated

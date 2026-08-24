@@ -112,6 +112,7 @@ class _RecordSource implements ResourceDataSource {
     String? sort,
     String? direction,
     bool reorder = false,
+    Map<String, Object?> filters = const {},
   }) => throw UnimplementedError();
 
   @override

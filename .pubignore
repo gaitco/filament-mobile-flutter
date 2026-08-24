@@ -4,6 +4,7 @@
 .packages
 build/
 pubspec.lock
+example/pubspec_overrides.yaml
 
 # Mirror-only. update-mirrors.sh copies these into the public mirror: contract/
 # so the mirror's own CI can run the golden tests, art/ so the README images

@@ -9,6 +9,7 @@ import '../schema/schema_component.dart';
 import '../state/resource_form_provider.dart';
 import 'layout.dart';
 import 'material_panel_state_builder.dart';
+import 'widget_slots.dart';
 
 /// One resource's create/edit form.
 ///
@@ -24,6 +25,7 @@ class ResourceFormScreen extends StatefulWidget {
     this.filePicker,
     this.maxContentWidth,
     this.onSaved,
+    this.widgetRegistry,
     super.key,
   });
 
@@ -36,6 +38,9 @@ class ResourceFormScreen extends StatefulWidget {
   /// still shows). `PanelShell`'s detail pane wires this to swap back to the
   /// view; absent, the form pops as it always has (P23).
   final VoidCallback? onSaved;
+
+  /// Application-owned widgets inserted around the fields and save action.
+  final FilamentWidgetRegistry? widgetRegistry;
 
   /// Lets the host wire in whatever file-picker plugin it uses. Null keeps
   /// every file field read-only and rendering
@@ -109,13 +114,29 @@ class _ResourceFormScreenState extends State<ResourceFormScreen> {
 
   Widget _form(BuildContext context) {
     final provider = widget.provider;
+    final scope = ResourceFormWidgetScope(provider: provider);
 
     final listView = ListView(
       padding: const EdgeInsets.all(12),
       children: [
         if (provider.formError != null) _banner(context, provider.formError!),
+        ...?widget.widgetRegistry?.build(
+          FilamentWidgetSlot.resourceFormBeforeFields,
+          context,
+          scope,
+        ),
         ..._buildSiblings(context, provider.components),
+        ...?widget.widgetRegistry?.build(
+          FilamentWidgetSlot.resourceFormAfterFields,
+          context,
+          scope,
+        ),
         const SizedBox(height: 16),
+        ...?widget.widgetRegistry?.build(
+          FilamentWidgetSlot.resourceFormBeforeActions,
+          context,
+          scope,
+        ),
         FilledButton(
           key: const ValueKey('form.submit'),
           // Disabled, not merely re-guarded: `ResourceFormProvider.submit()`
@@ -130,6 +151,11 @@ class _ResourceFormScreenState extends State<ResourceFormScreen> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : Text(widget.strings.save),
+        ),
+        ...?widget.widgetRegistry?.build(
+          FilamentWidgetSlot.resourceFormAfterActions,
+          context,
+          scope,
         ),
       ],
     );

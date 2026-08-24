@@ -392,6 +392,66 @@ void main() {
     expect(find.text('mine'), findsOneWidget);
   });
 
+  testWidgets(
+    'a per-field direction reaches built-in and host-custom widgets',
+    (tester) async {
+      final rtl = SchemaComponent.fromJson(const {
+        'type': 'text',
+        'name': 'caption.ar',
+        'direction': 'rtl',
+      }, 'form[0]');
+
+      await tester.pumpWidget(
+        harness(
+          component: rtl,
+          state: FieldState(value: null, onChanged: (_) {}),
+        ),
+      );
+
+      expect(
+        Directionality.of(tester.element(find.byType(EditableText))),
+        TextDirection.rtl,
+      );
+
+      final registry = FieldRegistry.defaults()
+        ..register(
+          'text',
+          (context, component, state) => Text(
+            Directionality.of(context).name,
+            key: const ValueKey('custom-direction'),
+          ),
+        );
+
+      await tester.pumpWidget(
+        harness(
+          registry: registry,
+          component: rtl,
+          state: FieldState(value: null, onChanged: (_) {}),
+        ),
+      );
+
+      expect(find.text('rtl'), findsOneWidget);
+    },
+  );
+
+  testWidgets('an absent field direction inherits the host', (tester) async {
+    final registry = FieldRegistry.defaults()
+      ..register(
+        'text',
+        (context, component, state) => Text(Directionality.of(context).name),
+      );
+
+    await tester.pumpWidget(
+      harness(
+        registry: registry,
+        component: fieldOfType('text', name: 'caption'),
+        state: FieldState(value: null, onChanged: (_) {}),
+      ),
+    );
+
+    expect(find.text('ltr'), findsOneWidget);
+  });
+
   test(
     'renderableTypes covers every writable type the real golden panel emits',
     () {

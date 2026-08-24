@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../data/resource_data_source.dart';
 import '../form/field_registry.dart';
 import '../ports/filament_file_picker.dart';
+import '../ports/filament_event_transport.dart';
 import '../ports/filament_strings.dart';
 import '../schema/resource_schema.dart';
 import '../state/dashboard_provider.dart';
@@ -23,6 +24,7 @@ import 'resource_form_screen.dart';
 import 'resource_list_screen.dart';
 import 'resource_row.dart';
 import 'resource_view_screen.dart';
+import 'widget_slots.dart';
 
 /// What the expanded detail pane shows for the selected record.
 enum _Pane { empty, view, form, create }
@@ -47,6 +49,8 @@ class PanelShell extends StatefulWidget {
     this.strings = const FilamentStrings(),
     this.registry,
     this.fieldRegistry,
+    this.widgetRegistry,
+    this.eventTransport,
     this.filePicker,
     this.chartBuilder,
     this.iconFor,
@@ -64,6 +68,10 @@ class PanelShell extends StatefulWidget {
   /// record tap that opens the target record in the current pane.
   final EntryRegistry? registry;
   final FieldRegistry? fieldRegistry;
+
+  /// Application-owned widgets forwarded to every package-owned screen.
+  final FilamentWidgetRegistry? widgetRegistry;
+  final FilamentEventTransport? eventTransport;
   final FilamentFilePicker? filePicker;
   final DashboardChartBuilder? chartBuilder;
 
@@ -320,8 +328,17 @@ class _PanelShellState extends State<PanelShell> {
   Widget _dashboardScreen() {
     return DashboardScreen(
       provider: _dashboard,
+      widgetRegistry: widget.widgetRegistry,
       chartBuilder: widget.chartBuilder,
       strings: widget.strings,
+      pollInterval: widget.panelProvider.panel?.poll?.dashboard,
+      eventTransport: widget.eventTransport,
+      realtimeChannels: [
+        for (final resource
+            in widget.panelProvider.panel?.resources ??
+                const <ResourceSchema>[])
+          if (resource.channel case final channel?) channel,
+      ],
       onStatTap: (resourceKey) {
         final resource = widget.panelProvider.panel?.resource(resourceKey);
         if (resource != null) _selectResource(resource);
@@ -334,6 +351,8 @@ class _PanelShellState extends State<PanelShell> {
 
     return ResourceListScreen(
       provider: provider,
+      widgetRegistry: widget.widgetRegistry,
+      eventTransport: widget.eventTransport,
       strings: widget.strings,
       rowStyle: compact ? null : ListRowStyle.row,
       selectedRecordId: compact ? null : _selectedRecordId,
@@ -379,6 +398,7 @@ class _PanelShellState extends State<PanelShell> {
   Widget _form(ResourceFormProvider provider, {VoidCallback? onSaved}) {
     return ResourceFormScreen(
       provider: provider,
+      widgetRegistry: widget.widgetRegistry,
       registry: widget.fieldRegistry,
       strings: widget.strings,
       filePicker: widget.filePicker,
@@ -400,6 +420,8 @@ class _PanelShellState extends State<PanelShell> {
     return Builder(
       builder: (context) => ResourceViewScreen(
         provider: provider,
+        widgetRegistry: widget.widgetRegistry,
+        eventTransport: widget.eventTransport,
         strings: widget.strings,
         registry:
             widget.registry ??
@@ -438,6 +460,9 @@ class _PanelShellState extends State<PanelShell> {
           await provider.load(keepPrevious: true);
         },
         onSeeAllTap: (relation, ownerId) {
+          final childResource = relation.resource == null
+              ? null
+              : widget.panelProvider.panel?.resource(relation.resource!);
           final relationList = RelationListProvider(
             source: widget.source,
             resourceKey: resource.key,
@@ -448,8 +473,25 @@ class _PanelShellState extends State<PanelShell> {
             Navigator.of(context),
             RelationListScreen(
               provider: relationList,
+              childResource: childResource,
+              fieldRegistry: widget.fieldRegistry,
+              widgetRegistry: widget.widgetRegistry,
               strings: widget.strings,
               filePicker: widget.filePicker,
+              onRecordTap: childResource == null
+                  ? null
+                  : (record) {
+                      final related = ResourceViewProvider(
+                        source: widget.source,
+                        resource: childResource,
+                        id: record.id,
+                      );
+                      _push(
+                        Navigator.of(context),
+                        _view(childResource, related, swapsPane: false),
+                        owns: [related],
+                      );
+                    },
             ),
             owns: [relationList],
           );

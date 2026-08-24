@@ -1095,6 +1095,55 @@
                 },
                 {
                     "type": "text",
+                    "name": "hidden_note",
+                    "label": "Hidden note",
+                    "helperText": null,
+                    "hidden": true,
+                    "disabled": false,
+                    "live": false,
+                    "rules": []
+                },
+                {
+                    "type": "map_point",
+                    "name": "location",
+                    "label": "Location",
+                    "helperText": null,
+                    "hidden": false,
+                    "disabled": false,
+                    "live": false,
+                    "rules": [],
+                    "config": {
+                        "tilesUrl": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+                        "attribution": null,
+                        "zoom": 12,
+                        "draggable": true,
+                        "clickable": true,
+                        "showMarker": true,
+                        "minZoom": 3,
+                        "maxZoom": 19,
+                        "default": {
+                            "lat": 30.0444,
+                            "lng": 31.2357
+                        }
+                    }
+                },
+                {
+                    "type": "phone",
+                    "name": "phone",
+                    "label": "Phone",
+                    "helperText": null,
+                    "hidden": false,
+                    "disabled": false,
+                    "live": false,
+                    "rules": [],
+                    "config": {
+                        "format": "national",
+                        "countryPath": "phone_country",
+                        "defaultCountry": "EG"
+                    }
+                },
+                {
+                    "type": "text",
                     "name": "relation_note",
                     "label": "Relation note",
                     "helperText": null,
@@ -1808,6 +1857,21 @@
                     "disabled": false,
                     "live": false,
                     "rules": []
+                },
+                {
+                    "type": "map_point_entry",
+                    "name": "location",
+                    "label": "Location",
+                    "helperText": null,
+                    "hidden": false,
+                    "disabled": false,
+                    "live": false,
+                    "rules": [],
+                    "config": {
+                        "tilesUrl": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+                        "attribution": null,
+                        "zoom": 12
+                    }
                 }
             ],
             "group": "Content"

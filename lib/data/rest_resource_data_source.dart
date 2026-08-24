@@ -1,4 +1,5 @@
 import '../dashboard/dashboard_data.dart';
+import '../ports/filament_conditional_transport.dart';
 import '../ports/filament_schema_cache.dart';
 import '../ports/filament_transport.dart';
 import '../ports/filament_upload_transport.dart';
@@ -22,7 +23,8 @@ import 'write_result.dart';
 /// the document changes far less often than a list is scrolled. Optionally
 /// also persists it across restarts and revalidates it with a conditional
 /// GET — see [cache] and [cacheKey] — through a [SchemaCacheStore].
-class RestResourceDataSource implements ResourceDataSource {
+class RestResourceDataSource
+    implements ResourceDataSource, FilterOptionsDataSource {
   RestResourceDataSource({
     required FilamentTransport transport,
     String prefix = '/api/mobile-panel',
@@ -76,6 +78,8 @@ class RestResourceDataSource implements ResourceDataSource {
   final SchemaCacheStore _schemaCache;
 
   PanelSchema? _panel;
+  final Map<String, ({Map<String, dynamic> body, String? etag})> _readCache =
+      {};
 
   @override
   Future<PanelSchema> panel() async => _panel ??= await _schemaCache.panel();
@@ -91,6 +95,7 @@ class RestResourceDataSource implements ResourceDataSource {
     String? sort,
     String? direction,
     bool reorder = false,
+    Map<String, Object?> filters = const {},
   }) async {
     final resource = await _resource(resourceKey);
 
@@ -100,7 +105,7 @@ class RestResourceDataSource implements ResourceDataSource {
     // `sort`/`direction` outright — the server ignores them in that mode
     // anyway, but sending them would make this client the one exception to
     // the contract's "?reorder=1 sends no sort params".
-    final response = await _transport.get(
+    final response = await _read(
       '$prefix/$resourceKey',
       query: {
         'page': '$page',
@@ -109,6 +114,7 @@ class RestResourceDataSource implements ResourceDataSource {
         if (!reorder && sort != null && sort.trim().isNotEmpty) 'sort': sort,
         if (!reorder && direction != null && direction.trim().isNotEmpty)
           'direction': direction,
+        ..._filterQuery(filters),
       },
     );
 
@@ -130,7 +136,7 @@ class RestResourceDataSource implements ResourceDataSource {
   Future<ResourceRecord> record(String resourceKey, Object id) async {
     final resource = await _resource(resourceKey);
 
-    final response = await _transport.get('$prefix/$resourceKey/$id');
+    final response = await _read('$prefix/$resourceKey/$id');
 
     final data = response['data'];
     if (data is! Map<String, dynamic>) {
@@ -382,7 +388,29 @@ class RestResourceDataSource implements ResourceDataSource {
       throw FilamentTransportException(_messageOf(response.body));
     }
 
-    final raw = response.body['options'];
+    return _optionsPage(response.body);
+  }
+
+  @override
+  Future<OptionsPage> filterOptions(
+    String resourceKey, {
+    required String filter,
+    required String query,
+  }) async {
+    final response = await _transport.post(
+      '$prefix/$resourceKey/filter-options',
+      {'filter': filter, 'q': query},
+    );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw FilamentTransportException(_messageOf(response.body));
+    }
+
+    return _optionsPage(response.body);
+  }
+
+  static OptionsPage _optionsPage(Map<String, dynamic> body) {
+    final raw = body['options'];
 
     return OptionsPage(
       options: [
@@ -394,13 +422,13 @@ class RestResourceDataSource implements ResourceDataSource {
                 label: '${entry['label'] ?? entry['value']}',
               ),
       ],
-      hasMore: response.body['hasMore'] == true,
+      hasMore: body['hasMore'] == true,
     );
   }
 
   @override
   Future<DashboardData> dashboard() async =>
-      DashboardData.fromJson(await _transport.get('$prefix/dashboard'));
+      DashboardData.fromJson(await _read('$prefix/dashboard'));
 
   @override
   Future<UploadResult> uploadFile(
@@ -490,6 +518,82 @@ class RestResourceDataSource implements ResourceDataSource {
   String _messageOf(Map<String, dynamic> body) {
     final message = body['message'];
     return message is String && message.isNotEmpty ? message : '';
+  }
+
+  /// Flattens [filters] into INDEXED query keys — never repeated ones. See
+  /// [ResourceDataSource.list]'s doc for why: [FilamentTransport.get] hands
+  /// the host a flat map that gets stringified value-by-value, so a raw
+  /// `List<String>` would go out as the literal `"[a, b]"` instead of a PHP
+  /// array. `filter[tags][0]`/`filter[tags][1]` parses server-side into the
+  /// same array `filter[tags][]` would have produced — do not "simplify"
+  /// this back to repeated keys.
+  ///
+  /// An EMPTY list gets the bare scalar `filter[name]=`, same as an empty
+  /// string — a query string cannot express an empty list on the wire, and
+  /// `filter[name]=` is exactly the "any" value `ListQuery::filterValue()`
+  /// already accepts for a multiple filter (Task 3). Without this branch a
+  /// multiple filter could never be cleared: an empty `List` would
+  /// otherwise produce zero indexed keys, i.e. nothing at all, which the
+  /// server reads as "key omitted" and answers with the filter's default
+  /// reinstated.
+  Map<String, String> _filterQuery(Map<String, Object?> filters) {
+    return {
+      for (final entry in filters.entries)
+        if (entry.value != null)
+          if (entry.value is List)
+            if ((entry.value as List).isEmpty)
+              'filter[${entry.key}]': ''
+            else
+              for (var i = 0; i < (entry.value as List).length; i++)
+                'filter[${entry.key}][$i]': '${(entry.value as List)[i]}'
+          else
+            'filter[${entry.key}]': '${entry.value}',
+    };
+  }
+
+  /// Conditionally revalidates pollable reads when the host implements the
+  /// existing optional ETag port. The cache is in-memory and scoped to this
+  /// authenticated data-source instance; a 304 can therefore never cross
+  /// users or survive a process restart.
+  Future<Map<String, dynamic>> _read(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async {
+    final transport = _transport;
+    if (transport is! FilamentConditionalTransport) {
+      return transport.get(path, query: query);
+    }
+
+    final requestPath = _pathWithQuery(path, query);
+    final cached = _readCache[requestPath];
+    final response = await (transport as FilamentConditionalTransport)
+        .getConditional(requestPath, etag: cached?.etag);
+
+    if (response.notModified) {
+      if (cached != null) return cached.body;
+      // A host must not produce 304 without an ETag supplied by this source,
+      // but a plain fetch is a safe recovery if it does.
+      return transport.get(path, query: query);
+    }
+
+    final body = response.body;
+    if (body == null) {
+      throw StateError('Conditional GET for `$requestPath` returned no body.');
+    }
+
+    _readCache[requestPath] = (body: body, etag: response.etag);
+    return body;
+  }
+
+  String _pathWithQuery(String path, Map<String, dynamic>? query) {
+    if (query == null || query.isEmpty) return path;
+    return Uri.parse(path)
+        .replace(
+          queryParameters: query.map(
+            (key, value) => MapEntry(key, value.toString()),
+          ),
+        )
+        .toString();
   }
 
   Future<ResourceSchema> _resource(String key) async {

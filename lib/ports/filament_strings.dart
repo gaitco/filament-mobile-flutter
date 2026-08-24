@@ -12,6 +12,9 @@ class FilamentStrings {
     this.chartUnavailable = 'No chart renderer supplied.',
     this.searchHint = 'Search',
     this.sortTitle = 'Sort by',
+    this.filters = 'Filters',
+    this.clearFilters = 'Clear all',
+    this.anyOption = 'Any',
     this.updateRequired = 'Please update the app',
     this.loadFailed = 'Could not load',
     this.fieldRequired = 'This field is required',
@@ -70,6 +73,23 @@ class FilamentStrings {
 
   final String searchHint;
   final String sortTitle;
+
+  /// Tooltip on `ResourceListScreen`'s filter action (P24), shown only when
+  /// `resource.filters.isNotEmpty` — see that screen's class doc for the
+  /// same gating on the sort action.
+  final String filters;
+
+  /// The filter sheet's action that resets every published filter to its
+  /// explicit "any" value — `ResourceListProvider.clearFilters()`'s trigger.
+  final String clearFilters;
+
+  /// The blank choice a single-value filter's picker shows ahead of its real
+  /// options — Filament's own web placeholder row. Choosing it maps to
+  /// `ResourceListProvider.setFilter(name, null)`, an explicit clear, never
+  /// an omitted parameter — see that method's doc for why the distinction
+  /// matters.
+  final String anyOption;
+
   final String updateRequired;
   final String loadFailed;
 
@@ -256,6 +276,9 @@ class FilamentStrings {
     chartUnavailable: 'لم يتم توفير أداة عرض للرسوم البيانية.',
     searchHint: 'بحث',
     sortTitle: 'ترتيب حسب',
+    filters: 'عوامل التصفية',
+    clearFilters: 'مسح الكل',
+    anyOption: 'الكل',
     updateRequired: 'يُرجى تحديث التطبيق',
     loadFailed: 'تعذّر التحميل',
     fieldRequired: 'هذا الحقل مطلوب',

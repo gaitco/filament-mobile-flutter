@@ -16,6 +16,7 @@ import 'package:filament_mobile/state/dashboard_provider.dart';
 import 'package:filament_mobile/ui/bidi_text.dart';
 import 'package:filament_mobile/ui/dashboard_screen.dart';
 import 'package:filament_mobile/ui/stat_sparkline.dart';
+import 'package:filament_mobile/ui/widget_slots.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -94,6 +95,7 @@ class FakeSource implements ResourceDataSource {
     String? sort,
     String? direction,
     bool reorder = false,
+    Map<String, Object?> filters = const {},
   }) async => throw UnimplementedError();
 
   @override
@@ -156,6 +158,7 @@ Widget dashboardHarness({
   FakeSource? source,
   DashboardChartBuilder? chartBuilder,
   void Function(String resourceKey)? onStatTap,
+  FilamentWidgetRegistry? widgetRegistry,
 }) {
   final resolvedSource = source ?? FakeSource();
 
@@ -165,6 +168,7 @@ Widget dashboardHarness({
         provider: DashboardProvider(resolvedSource),
         chartBuilder: chartBuilder,
         onStatTap: onStatTap,
+        widgetRegistry: widgetRegistry,
       ),
     ),
   );
@@ -172,6 +176,75 @@ Widget dashboardHarness({
 
 void main() {
   group('DashboardScreen', () {
+    testWidgets('per-widget slots receive the dashboard item and index', (
+      tester,
+    ) async {
+      final data = DashboardData.fromJson(const {
+        'widgets': [
+          {
+            'type': 'stats',
+            'stats': [
+              {'label': 'Orders', 'value': '12'},
+            ],
+          },
+          {
+            'type': 'chart',
+            'heading': 'Revenue',
+            'chartType': 'line',
+            'labels': ['Jan'],
+            'datasets': [
+              {
+                'label': 'Revenue',
+                'data': [10],
+              },
+            ],
+          },
+        ],
+      });
+      final seen = <(int?, Type)>[];
+      final registry = FilamentWidgetRegistry()
+        ..register(FilamentWidgetSlot.dashboardBeforeWidget, (context, scope) {
+          final dashboardScope = scope as DashboardWidgetScope;
+          seen.add((
+            dashboardScope.index,
+            dashboardScope.dashboardWidget.runtimeType,
+          ));
+          return Text('before ${dashboardScope.index}');
+        });
+
+      await tester.pumpWidget(
+        dashboardHarness(
+          source: FakeSource(dashboardData: data),
+          widgetRegistry: registry,
+        ),
+      );
+      await pumpUntilFound(tester, find.text('Orders'));
+
+      expect(seen, [(0, StatsWidgetData), (1, ChartWidgetData)]);
+      expect(find.text('before 0'), findsOneWidget);
+      expect(find.text('before 1'), findsOneWidget);
+    });
+
+    testWidgets('a custom widget can be the entire empty dashboard', (
+      tester,
+    ) async {
+      final registry = FilamentWidgetRegistry()
+        ..registerWidget(
+          FilamentWidgetSlot.dashboardBeforeContent,
+          const Text('custom dashboard'),
+        );
+
+      await tester.pumpWidget(
+        dashboardHarness(
+          source: FakeSource(dashboardData: const DashboardData()),
+          widgetRegistry: registry,
+        ),
+      );
+      await pumpUntilFound(tester, find.text('custom dashboard'));
+
+      expect(find.text('Nothing to show yet.'), findsNothing);
+    });
+
     // Deliberately does NOT settle — same reasoning as the sibling test on
     // ResourceViewScreen and PanelIndexScreen: the provider is still
     // `initial` on the first frame, and a screen that treats that as

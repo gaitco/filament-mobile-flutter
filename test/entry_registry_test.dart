@@ -247,6 +247,51 @@ void main() {
     expect(find.text('custom!'), findsOneWidget);
   });
 
+  testWidgets(
+    'a per-entry direction reaches built-in and host-custom widgets',
+    (tester) async {
+      final rtlEntry = parse(const {
+        'type': 'text_entry',
+        'name': 'name',
+        'label': 'الاسم',
+        'direction': 'rtl',
+      });
+
+      await tester.pumpWidget(
+        host(
+          Builder(
+            builder: (context) =>
+                EntryRegistry.defaults().build(context, rtlEntry, _record),
+          ),
+        ),
+      );
+
+      expect(
+        Directionality.of(tester.element(find.text('أحمد'))),
+        TextDirection.rtl,
+      );
+
+      final registry = EntryRegistry.defaults()
+        ..register(
+          'text_entry',
+          (context, component, record) => Text(
+            Directionality.of(context).name,
+            key: const ValueKey('custom-entry-direction'),
+          ),
+        );
+
+      await tester.pumpWidget(
+        host(
+          Builder(
+            builder: (context) => registry.build(context, rtlEntry, _record),
+          ),
+        ),
+      );
+
+      expect(find.text('rtl'), findsOneWidget);
+    },
+  );
+
   testWidgets('an image entry resolves the URL from a media sibling', (
     tester,
   ) async {

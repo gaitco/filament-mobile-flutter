@@ -63,6 +63,8 @@ class PaginatedCardList extends StatelessWidget {
     this.onRecordTap,
     this.rowTrailing,
     this.rowStyle = ListRowStyle.card,
+    this.beforeRecords = const [],
+    this.afterRecords = const [],
     this.header,
     this.selectedRecordId,
     super.key,
@@ -76,6 +78,12 @@ class PaginatedCardList extends StatelessWidget {
   /// one [ResourceCard] per record. `row` renders [ResourceRow]s with a
   /// thin divider between them instead, for wide screens (P23).
   final ListRowStyle rowStyle;
+
+  /// Widgets placed inside the same scrollable as the records. These are
+  /// used by the public custom-widget slots; empty lists preserve the legacy
+  /// item indexes and rendering exactly.
+  final List<Widget> beforeRecords;
+  final List<Widget> afterRecords;
 
   /// Pinned above the first row when set — typically a [ResourceRowHeader]
   /// in `row` style. Rendered as the list's own first item rather than a
@@ -111,6 +119,7 @@ class PaginatedCardList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final headerCount = header == null ? 0 : 1;
+    final recordOffset = beforeRecords.length + headerCount;
 
     final listView = ListView.separated(
       controller: controller,
@@ -120,8 +129,10 @@ class PaginatedCardList extends StatelessWidget {
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(8),
       itemCount:
+          beforeRecords.length +
           headerCount +
           records.length +
+          afterRecords.length +
           (isLoadingMore || loadMoreFailed ? 1 : 0),
       // A thin divider between rows in `row` style — a table, not a stack
       // of cards. Cards already carry their own margin, so this stays
@@ -130,10 +141,16 @@ class PaginatedCardList extends StatelessWidget {
           ? const Divider(height: 1)
           : const SizedBox.shrink(),
       itemBuilder: (context, index) {
-        if (header != null && index == 0) return header!;
+        if (index < beforeRecords.length) return beforeRecords[index];
 
-        final recordIndex = index - headerCount;
-        if (recordIndex >= records.length) return _trailingRow();
+        if (header != null && index == beforeRecords.length) return header!;
+
+        final recordIndex = index - recordOffset;
+        if (recordIndex >= records.length) {
+          final afterIndex = recordIndex - records.length;
+          if (afterIndex < afterRecords.length) return afterRecords[afterIndex];
+          return _trailingRow();
+        }
 
         final record = records[recordIndex];
         final onTap = onRecordTap == null ? null : () => onRecordTap!(record);

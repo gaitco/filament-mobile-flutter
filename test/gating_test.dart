@@ -74,6 +74,7 @@ class _Source implements ResourceDataSource {
     String? sort,
     String? direction,
     bool reorder = false,
+    Map<String, Object?> filters = const {},
   }) async => PaginatedRecords(
     records: [
       ResourceRecord.fromJson(const {'id': 1, 'name': 'صف'}, 'id'),

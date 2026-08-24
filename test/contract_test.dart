@@ -41,7 +41,15 @@ void main() {
       expect(users.card.badges.single.colors['banned'], 'danger');
       expect(users.search.enabled, isTrue);
       expect(users.defaultSort!.key, 'created_at');
-      expect(users.filters.single, isA<SelectComponent>());
+      // P24: three filters, between them covering a plain select, a
+      // multiple select, and a ternary-shaped select carrying a
+      // top-level default (never nested inside config — see
+      // contract/README.md's Table filters section).
+      expect(users.filters, hasLength(3));
+      expect(users.filters, everyElement(isA<SelectComponent>()));
+      final byName = {for (final f in users.filters) f.name: f};
+      expect((byName['role']! as SelectComponent).multiple, isTrue);
+      expect((byName['trashed']! as SelectComponent).defaultValue, '1');
     });
 
     test('the form section holds every v1 field type', () {
@@ -55,6 +63,7 @@ void main() {
       final byName = {for (final child in section.children) child.name: child};
 
       expect(byName['name'], isA<TextComponent>());
+      expect(byName['name']!.direction, ComponentDirection.rtl);
       expect((byName['email']! as TextComponent).kind, TextKind.email);
       expect((byName['password']! as TextComponent).kind, TextKind.password);
       expect((byName['bio']! as TextComponent).kind, TextKind.textarea);

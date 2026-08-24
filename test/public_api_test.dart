@@ -8,7 +8,13 @@
 // host could name the type it is handed. Every test in the package passed,
 // because every test imports by path.
 import 'package:filament_mobile/filament_mobile.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+class _HostEventTransport implements FilamentEventTransport {
+  @override
+  Stream<RealtimeEvent> events(String channel) => const Stream.empty();
+}
 
 void main() {
   test('a host can name and switch over every write outcome', () {
@@ -71,5 +77,42 @@ void main() {
     // whole test: it fails to compile if the barrel stops exporting it.
     FilamentUploadTransport? port;
     expect(port, isNull);
+  });
+
+  test('a host can configure custom widget slots through the barrel', () {
+    final registry = FilamentWidgetRegistry()
+      ..registerWidget(
+        FilamentWidgetSlot.dashboardBeforeContent,
+        const SizedBox(),
+      )
+      ..register(
+        FilamentWidgetSlot.resourceViewAfterContent,
+        (context, scope) =>
+            scope is ResourceViewWidgetScope ? const SizedBox() : null,
+      );
+
+    expect(registry, isA<FilamentWidgetRegistry>());
+  });
+
+  test('a host custom field can inspect the published component direction', () {
+    const direction = ComponentDirection.rtl;
+    expect(direction.name, 'rtl');
+  });
+
+  test('a host can implement the optional realtime event port', () {
+    final transport = _HostEventTransport();
+    const event = RealtimeEvent.changed(
+      resourceKey: 'orders',
+      recordId: 7,
+      event: 'updated',
+    );
+
+    expect(transport, isA<FilamentEventTransport>());
+    expect(event.resourceKey, 'orders');
+  });
+
+  test('a host can detect the optional remote-filter options capability', () {
+    FilterOptionsDataSource? source;
+    expect(source, isNull);
   });
 }

@@ -28,7 +28,18 @@ class DashboardProvider extends ChangeNotifier {
   /// True when the load failed on a 401 — see [FilamentTransportException.statusCode].
   bool get isUnauthenticated => _isUnauthenticated;
 
-  Future<void> load() async {
+  Future<void> load({bool keepPrevious = false}) =>
+      _load(keepPrevious: keepPrevious, silentFailure: false);
+
+  /// Timer-driven revalidation that preserves an already-rendered dashboard
+  /// through a transient failure. A 401 still replaces it with signed-out.
+  Future<void> refresh() => _load(keepPrevious: true, silentFailure: true);
+
+  Future<void> _load({
+    required bool keepPrevious,
+    required bool silentFailure,
+  }) async {
+    final preserve = keepPrevious && _data != null;
     _status = LoadStatus.loading;
     _errorMessage = null;
     _isUnauthenticated = false;
@@ -53,7 +64,9 @@ class DashboardProvider extends ChangeNotifier {
         _isUnauthenticated = true;
       }
       _errorMessage = messageOf(e);
-      _status = LoadStatus.failure;
+      _status = preserve && silentFailure && !_isUnauthenticated
+          ? LoadStatus.success
+          : LoadStatus.failure;
     }
 
     notifyListeners();

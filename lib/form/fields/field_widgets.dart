@@ -53,6 +53,57 @@ class TextFieldWidget extends StatelessWidget {
   }
 }
 
+/// `phone`. The keyboard is the only client-side specialization: the value
+/// is returned verbatim and the server remains the sole formatter/validator.
+class PhoneFieldWidget extends StatelessWidget {
+  const PhoneFieldWidget({
+    required this.component,
+    required this.state,
+    super.key,
+  });
+
+  final PhoneComponent component;
+  final FieldState state;
+
+  @override
+  Widget build(BuildContext context) {
+    return _TextControl(
+      value: state.value as String?,
+      enabled: state.enabled,
+      keyboardType: TextInputType.phone,
+      onChanged: state.onChanged,
+      decoration: InputDecoration(
+        labelText: component.label,
+        hintText: component.placeholder,
+        helperText: component.helperText,
+        errorText: state.error,
+      ),
+    );
+  }
+}
+
+/// Honest fallback for a known contract type whose optional renderer was not
+/// registered by the host application.
+class UnsupportedFieldWidget extends StatelessWidget {
+  const UnsupportedFieldWidget({required this.component, super.key});
+
+  final SchemaComponent component;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: 'Unsupported field ${component.type}',
+      child: Card(
+        child: ListTile(
+          leading: const Icon(Icons.extension_off_outlined),
+          title: Text(component.label ?? component.name ?? component.type),
+          subtitle: Text('Renderer not registered: ${component.type}'),
+        ),
+      ),
+    );
+  }
+}
+
 /// `number`. Reports a parsed `num`, never the raw string — the contract's
 /// numeric fields expect a number back, not text that happens to look like one.
 class NumberFieldWidget extends StatelessWidget {
@@ -1837,7 +1888,11 @@ class RemoteSelectField extends StatelessWidget {
     // The value is shown even when no fetched option matches it: on an edit
     // form the stored foreign key arrives before any search has run, and the
     // user must see what the record holds.
-    final shown = state.value == null ? null : '${state.value}';
+    final shown = switch (state.value) {
+      final List values => values.join(', '),
+      null => null,
+      final value => '$value',
+    };
 
     return InkWell(
       onTap: state.enabled ? () => _open(context) : null,
@@ -1860,7 +1915,7 @@ class RemoteSelectField extends StatelessWidget {
     // field's `Directionality` (review finding 2).
     final direction = Directionality.of(context);
 
-    final picked = await showModalBottomSheet<SelectOption>(
+    final picked = await showModalBottomSheet<Object?>(
       context: context,
       isScrollControlled: true,
       builder: (context) => Directionality(
@@ -1869,11 +1924,13 @@ class RemoteSelectField extends StatelessWidget {
           label: component.label,
           search: state.searchOptions!,
           strings: state.strings,
+          multiple: component.multiple,
+          initialValue: state.value,
         ),
       ),
     );
 
-    if (picked != null) state.onChanged(picked.value);
+    if (picked != null) state.onChanged(picked);
   }
 }
 
@@ -1882,10 +1939,14 @@ class _RemoteSearchSheet extends StatefulWidget {
     required this.label,
     required this.search,
     required this.strings,
+    required this.multiple,
+    required this.initialValue,
   });
 
   final String? label;
   final Future<OptionsPage> Function(String query) search;
+  final bool multiple;
+  final Object? initialValue;
 
   /// Threaded in from the field's [FieldState], the same path every other
   /// field widget reads its strings through — the sheet is pushed as a
@@ -1900,6 +1961,13 @@ class _RemoteSearchSheet extends StatefulWidget {
 class _RemoteSearchSheetState extends State<_RemoteSearchSheet> {
   OptionsPage _page = const OptionsPage.empty();
   Timer? _debounce;
+  bool _loading = true;
+  Object? _error;
+  String _query = '';
+  int _runId = 0;
+  late final Set<Object?> _selected = {
+    if (widget.initialValue is List) ...(widget.initialValue as List),
+  };
 
   @override
   void initState() {
@@ -1916,16 +1984,35 @@ class _RemoteSearchSheetState extends State<_RemoteSearchSheet> {
   }
 
   void _onChanged(String query) {
+    _query = query;
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 300), () => _run(query));
   }
 
   Future<void> _run(String query) async {
-    final page = await widget.search(query);
+    final runId = ++_runId;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
 
-    if (!mounted) return;
+    try {
+      final page = await widget.search(query);
 
-    setState(() => _page = page);
+      if (!mounted || runId != _runId) return;
+
+      setState(() {
+        _page = page;
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted || runId != _runId) return;
+
+      setState(() {
+        _error = error;
+        _loading = false;
+      });
+    }
   }
 
   @override
@@ -1938,40 +2025,108 @@ class _RemoteSearchSheetState extends State<_RemoteSearchSheet> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: TextField(
-                key: const ValueKey('options.search'),
-                autofocus: true,
-                decoration: InputDecoration(labelText: widget.label),
-                onChanged: _onChanged,
-              ),
-            ),
-            Flexible(
-              child: ListView(
-                shrinkWrap: true,
-                children: [
-                  for (final option in _page.options)
-                    ListTile(
-                      key: ValueKey('options.item.${option.value}'),
-                      title: Text(option.label),
-                      onTap: () => Navigator.of(context).pop(option),
+            Row(
+              children: [
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: TextField(
+                      key: const ValueKey('options.search'),
+                      autofocus: true,
+                      decoration: InputDecoration(
+                        labelText: widget.label ?? widget.strings.searchHint,
+                      ),
+                      onChanged: _onChanged,
                     ),
-                  // Says the list was cut short rather than implying it ended —
-                  // a user who cannot find their record otherwise concludes it
-                  // does not exist.
-                  if (_page.hasMore)
-                    ListTile(
-                      key: const ValueKey('options.hasMore'),
-                      dense: true,
-                      title: Text(widget.strings.keepTypingToNarrowList),
-                    ),
-                ],
-              ),
+                  ),
+                ),
+                if (widget.multiple)
+                  TextButton(
+                    key: const ValueKey('options.save'),
+                    onPressed: () => Navigator.of(
+                      context,
+                    ).pop(_selected.toList(growable: false)),
+                    child: Text(widget.strings.save),
+                  ),
+                if (widget.multiple) const SizedBox(width: 8),
+              ],
             ),
+            Flexible(child: _results(context)),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _results(BuildContext context) {
+    if (_loading) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32),
+          child: CircularProgressIndicator(key: ValueKey('options.loading')),
+        ),
+      );
+    }
+
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(widget.strings.loadFailed),
+              const SizedBox(height: 8),
+              TextButton(
+                key: const ValueKey('options.retry'),
+                onPressed: () => _run(_query),
+                child: Text(widget.strings.retry),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_page.options.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Text(widget.strings.empty),
+        ),
+      );
+    }
+
+    return ListView(
+      shrinkWrap: true,
+      children: [
+        for (final option in _page.options)
+          if (widget.multiple)
+            CheckboxListTile(
+              key: ValueKey('options.item.${option.value}'),
+              value: _selected.contains(option.value),
+              title: Text(option.label),
+              onChanged: (checked) => setState(() {
+                checked == true
+                    ? _selected.add(option.value)
+                    : _selected.remove(option.value);
+              }),
+            )
+          else
+            ListTile(
+              key: ValueKey('options.item.${option.value}'),
+              title: Text(option.label),
+              onTap: () => Navigator.of(context).pop(option.value),
+            ),
+        // Says the list was cut short rather than implying it ended — a user
+        // who cannot find their record otherwise concludes it does not exist.
+        if (_page.hasMore)
+          ListTile(
+            key: const ValueKey('options.hasMore'),
+            dense: true,
+            title: Text(widget.strings.keepTypingToNarrowList),
+          ),
+      ],
     );
   }
 }

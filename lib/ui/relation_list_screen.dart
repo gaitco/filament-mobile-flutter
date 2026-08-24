@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../data/relation_submit_target.dart';
 import '../data/resource_record.dart';
 import '../data/write_result.dart';
+import '../form/field_registry.dart';
 import '../ports/filament_file_picker.dart';
 import '../ports/filament_strings.dart';
 import '../ports/panel_view_state.dart';
@@ -14,6 +15,7 @@ import '../state/resource_form_provider.dart';
 import 'material_panel_state_builder.dart';
 import 'paginated_card_list.dart';
 import 'resource_form_screen.dart';
+import 'widget_slots.dart';
 
 /// One relation's full, paginated child rows — what `RelationSectionWidget`'s
 /// "See all" opens.
@@ -49,6 +51,8 @@ class RelationListScreen extends StatefulWidget {
     this.strings = const FilamentStrings(),
     this.onRecordTap,
     this.filePicker,
+    this.fieldRegistry,
+    this.widgetRegistry,
     super.key,
   });
 
@@ -67,6 +71,13 @@ class RelationListScreen extends StatefulWidget {
   /// `ResourceFormScreen` — without it a file field on the child form renders
   /// read-only, same as there.
   final FilamentFilePicker? filePicker;
+
+  /// Forwarded to relation-owned create/edit forms so custom field builders
+  /// work there exactly as they do on a top-level resource form.
+  final FieldRegistry? fieldRegistry;
+
+  /// Application-owned widgets inserted into this screen's named slots.
+  final FilamentWidgetRegistry? widgetRegistry;
 
   @override
   State<RelationListScreen> createState() => _RelationListScreenState();
@@ -182,13 +193,13 @@ class _RelationListScreenState extends State<RelationListScreen> {
         ),
         body: ListenableBuilder(
           listenable: widget.provider,
-          builder: (context, _) => builder(context, _state()),
+          builder: (context, _) => builder(context, _state(context)),
         ),
       ),
     );
   }
 
-  PanelViewState _state() {
+  PanelViewState _state(BuildContext context) {
     final provider = widget.provider;
 
     // `initial` belongs with `loading` — the first frame runs before the
@@ -210,14 +221,35 @@ class _RelationListScreenState extends State<RelationListScreen> {
       return PanelFailure(message: message, retry: provider.load);
     }
 
-    if (provider.records.isEmpty) {
+    final scope = RelationListWidgetScope(
+      provider: provider,
+      childResource: widget.childResource,
+    );
+    final before =
+        widget.widgetRegistry?.build(
+          FilamentWidgetSlot.relationListBeforeContent,
+          context,
+          scope,
+        ) ??
+        const <Widget>[];
+    final after =
+        widget.widgetRegistry?.build(
+          FilamentWidgetSlot.relationListAfterContent,
+          context,
+          scope,
+        ) ??
+        const <Widget>[];
+
+    if (provider.records.isEmpty && before.isEmpty && after.isEmpty) {
       return PanelEmpty(message: widget.strings.relationEmpty);
     }
 
-    return PanelData(content: _list());
+    return PanelData(
+      content: _list(before: before, after: after),
+    );
   }
 
-  Widget _list() {
+  Widget _list({required List<Widget> before, required List<Widget> after}) {
     final provider = widget.provider;
 
     return PaginatedCardList(
@@ -230,6 +262,8 @@ class _RelationListScreenState extends State<RelationListScreen> {
       onRefresh: provider.refresh,
       onLoadMoreRetry: provider.loadMore,
       controller: _scroll,
+      beforeRecords: before,
+      afterRecords: after,
       onRecordTap: widget.onRecordTap,
       rowTrailing: _hasRowAffordances ? _rowTrailing : null,
     );
@@ -313,7 +347,9 @@ class _RelationListScreenState extends State<RelationListScreen> {
         MaterialPageRoute<void>(
           builder: (context) => ResourceFormScreen(
             provider: formProvider,
+            registry: widget.fieldRegistry,
             filePicker: widget.filePicker,
+            widgetRegistry: widget.widgetRegistry,
           ),
         ),
       );

@@ -12,6 +12,16 @@ SchemaComponent remoteSelect(String name) => SchemaComponent.fromJson({
   'config': {'optionsUrl': '/api/mobile-panel/banners/options'},
 }, 'form[0]');
 
+SchemaComponent remoteMultiSelect(String name) => SchemaComponent.fromJson({
+  'type': 'select',
+  'name': name,
+  'label': name,
+  'config': {
+    'optionsUrl': '/api/mobile-panel/banners/options',
+    'multiple': true,
+  },
+}, 'form[0]');
+
 Widget harness({
   required SchemaComponent component,
   required FieldState state,
@@ -148,6 +158,88 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('options.hasMore')), findsNothing);
+  });
+
+  testWidgets('shows an honest empty state after a successful empty search', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      harness(
+        component: remoteSelect('company_id'),
+        state: FieldState(
+          value: null,
+          onChanged: (_) {},
+          searchOptions: (_) async => const OptionsPage.empty(),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(InkWell));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Nothing here yet'), findsOneWidget);
+  });
+
+  testWidgets('shows failure and retries the same query', (tester) async {
+    var calls = 0;
+    await tester.pumpWidget(
+      harness(
+        component: remoteSelect('company_id'),
+        state: FieldState(
+          value: null,
+          onChanged: (_) {},
+          searchOptions: (_) async {
+            if (calls++ == 0) throw Exception('offline');
+            return const OptionsPage(options: [acme], hasMore: false);
+          },
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(InkWell));
+    await tester.pumpAndSettle();
+    expect(find.text('Could not load'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('options.retry')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('options.item.3')), findsOneWidget);
+    expect(calls, 2);
+  });
+
+  testWidgets('multiple remote selection stays open until Save', (
+    tester,
+  ) async {
+    Object? received;
+    await tester.pumpWidget(
+      harness(
+        component: remoteMultiSelect('companies'),
+        state: FieldState(
+          value: const [2],
+          onChanged: (value) => received = value,
+          searchOptions: (_) async => const OptionsPage(
+            options: [
+              SelectOption(value: 2, label: 'Beta'),
+              SelectOption(value: 3, label: 'Acme Ltd'),
+            ],
+            hasMore: false,
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(InkWell));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('options.item.3')));
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('options.search')), findsOneWidget);
+    expect(received, isNull);
+
+    await tester.tap(find.byKey(const ValueKey('options.save')));
+    await tester.pumpAndSettle();
+
+    expect(received, [2, 3]);
   });
 
   testWidgets('a disabled remote select does not open', (tester) async {

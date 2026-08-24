@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../data/action_result.dart';
@@ -6,15 +8,19 @@ import '../data/record_can.dart';
 import '../data/resource_record.dart';
 import '../data/write_result.dart';
 import '../ports/filament_strings.dart';
+import '../ports/filament_event_transport.dart';
 import '../ports/panel_view_state.dart';
 import '../schema/relation_descriptor.dart';
 import '../schema/schema_component.dart';
 import '../state/resource_view_provider.dart';
+import '../state/polling_signals.dart';
+import '../state/realtime_signals.dart';
 import 'entry_registry.dart';
 import 'layout.dart';
 import 'material_panel_state_builder.dart';
 import 'relation_section_widget.dart';
 import 'semantic_badge.dart';
+import 'widget_slots.dart';
 
 /// One record's infolist.
 ///
@@ -29,6 +35,8 @@ class ResourceViewScreen extends StatefulWidget {
     this.onEditTap,
     this.onSeeAllTap,
     this.maxContentWidth,
+    this.widgetRegistry,
+    this.eventTransport,
     super.key,
   });
 
@@ -52,6 +60,10 @@ class ResourceViewScreen extends StatefulWidget {
   /// current layout (720 when not compact, unconstrained when compact).
   final double? maxContentWidth;
 
+  /// Application-owned widgets inserted around record and relation content.
+  final FilamentWidgetRegistry? widgetRegistry;
+  final FilamentEventTransport? eventTransport;
+
   @override
   State<ResourceViewScreen> createState() => _ResourceViewScreenState();
 }
@@ -59,10 +71,13 @@ class ResourceViewScreen extends StatefulWidget {
 class _ResourceViewScreenState extends State<ResourceViewScreen> {
   late final EntryRegistry _registry =
       widget.registry ?? EntryRegistry.defaults();
+  PollingSignals? _polling;
+  RealtimeSignals? _realtime;
 
   @override
   void initState() {
     super.initState();
+    _configureRefreshSignals();
     // Only an untouched provider is loaded — a host-owned provider that has
     // already fetched its record keeps it across a re-mount.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -71,7 +86,61 @@ class _ResourceViewScreenState extends State<ResourceViewScreen> {
   }
 
   @override
+  void didUpdateWidget(covariant ResourceViewScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.provider != widget.provider ||
+        oldWidget.provider.resource.poll?.detail !=
+            widget.provider.resource.poll?.detail ||
+        oldWidget.provider.resource.channel !=
+            widget.provider.resource.channel ||
+        oldWidget.eventTransport != widget.eventTransport) {
+      _configureRefreshSignals();
+    }
+  }
+
+  @override
+  void dispose() {
+    _polling?.dispose();
+    unawaited(_realtime?.dispose());
+    super.dispose();
+  }
+
+  void _configureRefreshSignals() {
+    _polling?.dispose();
+    _polling = null;
+    unawaited(_realtime?.dispose());
+    _realtime = null;
+
+    final eventTransport = widget.eventTransport;
+    final channel = widget.provider.resource.channel;
+    final interval = widget.provider.resource.poll?.detail;
+    if (eventTransport != null && channel != null) {
+      _realtime = RealtimeSignals(
+        transport: eventTransport,
+        channels: [channel],
+        canSignal: () =>
+            mounted &&
+            !widget.provider.status.isLoading &&
+            (ModalRoute.of(context)?.isCurrent ?? true),
+        onSignal: widget.provider.refresh,
+      )..start();
+    }
+
+    if (interval == null) return;
+
+    _polling = PollingSignals(
+      interval: _realtime == null ? interval : interval * 4,
+      canPoll: () =>
+          mounted &&
+          !widget.provider.status.isLoading &&
+          (ModalRoute.of(context)?.isCurrent ?? true),
+      onPoll: widget.provider.refresh,
+    )..start();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    unawaited(_realtime?.flush());
     final builder =
         widget.stateBuilder ?? materialPanelStateBuilder(widget.strings);
 
@@ -103,17 +172,57 @@ class _ResourceViewScreenState extends State<ResourceViewScreen> {
       return PanelFailure(message: message, retry: provider.load);
     }
 
-    // Anything not settled is loading — `initial` included. The first frame
-    // runs before the post-frame load(), and treating that frame as anything
-    // else flashes an empty screen the user never asked for.
-    if (!provider.status.isSuccess) return const PanelLoading();
+    // A background refresh keeps the loaded record visible. Only a true first
+    // load has no record and needs the full-screen skeleton.
+    if (!provider.status.isSuccess && provider.record == null) {
+      return const PanelLoading();
+    }
 
     final record = provider.record;
-    if (record == null || provider.resource.infolist.isEmpty) {
+    if (record == null) {
       return PanelEmpty(message: widget.strings.empty);
     }
 
-    return PanelData(content: _infolist(context, record));
+    final scope = ResourceViewWidgetScope(provider: provider, record: record);
+    final before =
+        widget.widgetRegistry?.build(
+          FilamentWidgetSlot.resourceViewBeforeContent,
+          context,
+          scope,
+        ) ??
+        const <Widget>[];
+    final beforeRelations =
+        widget.widgetRegistry?.build(
+          FilamentWidgetSlot.resourceViewBeforeRelations,
+          context,
+          scope,
+        ) ??
+        const <Widget>[];
+    final after =
+        widget.widgetRegistry?.build(
+          FilamentWidgetSlot.resourceViewAfterContent,
+          context,
+          scope,
+        ) ??
+        const <Widget>[];
+
+    if (provider.resource.infolist.isEmpty &&
+        provider.resource.relations.isEmpty &&
+        before.isEmpty &&
+        beforeRelations.isEmpty &&
+        after.isEmpty) {
+      return PanelEmpty(message: widget.strings.empty);
+    }
+
+    return PanelData(
+      content: _infolist(
+        context,
+        record,
+        before: before,
+        beforeRelations: beforeRelations,
+        after: after,
+      ),
+    );
   }
 
   /// No pull-to-refresh. `load()` swaps the whole body — the RefreshIndicator
@@ -124,7 +233,13 @@ class _ResourceViewScreenState extends State<ResourceViewScreen> {
   /// the gesture at all. Refreshing in place needs the provider to hold the
   /// old record while reloading, which is a P2 concern, not a brief
   /// requirement.
-  Widget _infolist(BuildContext context, ResourceRecord record) {
+  Widget _infolist(
+    BuildContext context,
+    ResourceRecord record, {
+    required List<Widget> before,
+    required List<Widget> beforeRelations,
+    required List<Widget> after,
+  }) {
     // Top-level entries are grouped into one card rather than left loose on
     // the page background. A panel whose infolist declares Sections already
     // got that treatment from `SectionTile`; one that declares bare entries —
@@ -140,10 +255,10 @@ class _ResourceViewScreenState extends State<ResourceViewScreen> {
       // one supplied.
       (component is LayoutComponent ? blocks : loose).add(built);
     }
-
     final listView = ListView(
       padding: const EdgeInsets.all(12),
       children: [
+        ...before,
         if (loose.isNotEmpty)
           Card(
             child: Padding(
@@ -156,7 +271,9 @@ class _ResourceViewScreenState extends State<ResourceViewScreen> {
             ),
           ),
         ...blocks,
+        ...beforeRelations,
         ..._relationSections(record),
+        ...after,
       ],
     );
 

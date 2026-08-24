@@ -73,6 +73,67 @@ host whose HTTP client carries no base URL of its own.
 A full runnable host — real HTTP transport, schema cache, upload, file picker
 and link handling — is in [`example/`](example).
 
+## Custom Flutter widgets
+
+Use `FilamentWidgetRegistry` when an application needs to place its own
+Flutter UI inside package-owned screens. Register once and pass the registry
+to `PanelShell`; the shell forwards it to the dashboard, resource lists,
+record views, forms, relation lists, and relation-owned forms:
+
+```dart
+final widgets = FilamentWidgetRegistry()
+  ..register(
+    FilamentWidgetSlot.resourceListBeforeContent,
+    (context, scope) {
+      final list = scope as ResourceListWidgetScope;
+      if (list.resource.key != 'orders') return null;
+
+      return Card(
+        child: ListTile(
+          leading: const Icon(Icons.info_outline),
+          title: const Text('Orders are synchronized every five minutes.'),
+          trailing: Text('${list.provider.records.length} loaded'),
+        ),
+      );
+    },
+  )
+  ..registerWidget(
+    FilamentWidgetSlot.resourceFormAfterActions,
+    const Padding(
+      padding: EdgeInsets.only(top: 12),
+      child: Text('Changes are written to the audit log.'),
+    ),
+  );
+
+PanelShell(
+  source: source,
+  panelProvider: PanelProvider(source),
+  widgetRegistry: widgets,
+);
+```
+
+Multiple builders in one slot render in registration order. A builder may
+return `null` to target only one resource or record. Every scope is typed for
+its screen and exposes the live provider; record-view scopes also expose the
+loaded `ResourceRecord`, and per-dashboard-widget scopes expose the widget and
+its index.
+
+The stable placements are:
+
+- panel index: before / after content;
+- dashboard: before / after all content and before / after each server widget;
+- resource list and relation list: before / after records;
+- record view: before entries, before relations, and after all content;
+- resource form: before / after fields and before / after the save action.
+
+Pass the same registry directly to an individual screen when composing a
+custom shell. Slot widgets live inside the screen's own scrollable content,
+inherit its theme and LTR/RTL direction, and adapt with its phone/tablet/desktop
+layout. A before/after-content widget can also be the only content of a
+successfully loaded but otherwise empty screen. The registry owns placement
+only; the host retains normal ownership of the widget's state, callbacks,
+services, and visual styling.
+
 ## Wide screens
 
 ![Phone, tablet and desktop layouts](https://raw.githubusercontent.com/gaitco/filament-mobile-flutter/main/art/wide.png)
@@ -134,14 +195,17 @@ PanelShell(
 
 | Feature | What you get |
 |---|---|
+| [Custom widgets](#custom-flutter-widgets) | Host-owned Flutter widgets in stable named positions across every screen |
 | [Wide screens](#wide-screens) | `PanelShell` — drawer / rail / sidebar + master-detail, by form factor |
 | [Actions](#actions) | Buttons the server already authorised for this record |
+| [Filters](#filters) | A sheet and indicator chips off the server's published filters, with a badge showing how many are active |
 | [Upload](#upload) | Single- and multi-file upload, through an additive port your existing transport need not implement |
 | [Repeater](#repeater) | Add and remove rows, validated per row |
 | [Radio](#radio) | Real radio buttons, parsed off `select`'s own model |
 | [Toggle buttons](#toggle-buttons) | Chips — one choice or many, off `select`'s option shape |
 | [Slider](#slider) | Material `Slider` / `RangeSlider`, divisions from the published step |
 | [Tags](#tags) | Chips with a remove affordance, always a `List<String>` |
+| [Maps and phone numbers](#maps-and-phone-numbers) | Built-in verbatim phone editing; opt-in interactive maps through `filament_mobile_maps` |
 | [Translatable](#translatable) | One field, locale chips — instead of a stacked field per locale |
 | [Key/value](#keyvalue) | Add/remove pairs, key and value cells gated independently |
 | [Colour](#colour) | A text field with a live swatch, in the panel's own format |
@@ -149,8 +213,9 @@ PanelShell(
 | [Relations](#relations) | A child list on the record screen — writable when the server names a child resource; "See all" opens the full paginated view, with search and sort where the server declares them |
 | [Rich text](#rich-text) | A real document — headings, lists, quotes, emphasis, links |
 | [Schema caching](#schema-caching) | Cold start renders from cache, revalidates behind it |
+| [Background refresh](#background-refresh) | Lifecycle-aware polling plus an optional host-owned realtime adapter |
 | [Dashboard](#dashboard) | Stat tiles render; charts drawn by the opt-in [`filament_mobile_charts`](https://pub.dev/packages/filament_mobile_charts) sibling, or your own builder |
-| [RTL and i18n](#rtl-and-i18n) | The panel's direction, not the device's |
+| [RTL and i18n](#rtl-and-i18n) | Panel direction plus explicit field/entry overrides |
 
 Everything below is reference. Each feature section ends with a **Known
 weaknesses** list stating plainly what it does not do.
@@ -159,18 +224,23 @@ weaknesses** list stating plainly what it does not do.
 
 ![Form field types](https://raw.githubusercontent.com/gaitco/filament-mobile-flutter/main/art/inputs.png)
 
-Every wire type the server can publish for a **form** has a built-in widget:
+The core package has built-in widgets for these form types:
 
 `text` · `textarea` · `email` · `password` · `number` · `select` ·
 `multiselect` · `radio` · `toggle_buttons` · `slider` · `toggle` ·
 `checkbox` · `date` · `datetime` ·
-`time` · `color` · `file` · `tags` · `keyvalue` · `repeater`
+`time` · `color` · `file` · `tags` · `keyvalue` · `repeater` · `phone`
 
 Infolist entries render through `EntryRegistry`: `text_entry`,
 `badge_entry`, `boolean_entry`, `image_entry` and `rich_entry`. An
 entry-typed node reaching a *form* — the server's `Placeholder` publishes as
 `text_entry` — renders nothing: entries belong to infolists, and the field
 registry's fallback arm is a `SizedBox.shrink()`.
+
+`map_point` and `map_point_entry` are parsed in core but rendered by the
+optional [`filament_mobile_maps`](https://pub.dev/packages/filament_mobile_maps)
+companion. Without it they show a visible extension-required card instead of
+silently disappearing.
 
 A card's **badge slot bound to a boolean column** renders a `BooleanBadge`
 (`lib/ui/semantic_badge.dart`) — Filament's boolean-column idiom, a check or
@@ -202,6 +272,42 @@ ResourceFormScreen(provider: provider, registry: registry);
 That pairs with `config('filament-mobile.types')` on the server, which maps an
 unmapped Filament component onto a type the contract already defines — see the
 Laravel package's **Supported form inputs**.
+
+## Maps and phone numbers
+
+`phone` is built into core. It uses `TextInputType.phone`, preserves the
+server's stored string verbatim, and displays a field-keyed 422 from the phone
+plugin. The published format and country values describe the panel; core does
+not reformat, validate locally, or add a country picker.
+
+Maps stay optional so applications that do not use them keep the core
+package's two-dependency floor. Install and register the companion once:
+
+```bash
+flutter pub add filament_mobile_maps
+```
+
+```dart
+final fields = FieldRegistry.defaults()
+  ..register('map_point', mapFieldBuilder());
+final entries = EntryRegistry.defaults()
+  ..register('map_point_entry', mapEntryBuilder());
+
+PanelShell(
+  source: source,
+  panelProvider: panelProvider,
+  fieldRegistry: fields,
+  entryRegistry: entries,
+  widgetRegistry: widgets, // optional host-owned content slots
+);
+```
+
+The map renderer honours the server's pan/tap gates, marker, camera bounds,
+tile template, and attribution. Attribution remains visible even when the
+server omitted it. The map builders use the same registries as every custom
+field/entry renderer; `FilamentWidgetRegistry` remains available independently
+when the host also wants to place arbitrary Flutter widgets before or after
+package content.
 
 ## Implementing `FilamentTransport`
 
@@ -320,6 +426,48 @@ Two more strings joined the `FilamentStrings` English-default rule above:
 (`'Confirm'`). A host that upgrades and changes nothing still compiles and
 still runs — and, per the same caveat as every other default, shows English
 under server-translated action labels until the host supplies its own.
+
+## Filters
+
+*A sheet, indicator chips, and the count badge — driven by `/schema`'s
+`filters` array, never a client-side guess at what the server can narrow.*
+
+A resource's published filters (`ResourceSchema.filters`, a `List<
+SchemaComponent>` shaped exactly like a form select) drive `FilterSheet`
+(`lib/ui/filter_sheet.dart`), opened from a filter `IconButton` beside the
+sort action on `ResourceListScreen` — hidden when `resource.filters` is
+empty, exactly like the sort action is hidden with no sorts. The button
+carries a `Badge` showing `ResourceListProvider.activeFilterCount` (an
+already-cleared filter — `''`, `null`, or an empty `List` — does not count)
+whenever it is greater than zero.
+
+The sheet renders one `SelectFieldWidget` per filter against
+`provider.filters[name]` / `provider.setFilter(name, value)`, plus a "Clear
+all" button (`provider.clearFilters()`). A single-value (non-`multiple`)
+filter gets a synthetic "Any" option prepended, so a filter with no explicit
+value still reads as a real selection rather than a blank field; picking it
+calls `setFilter(name, null)` — an explicit clear, not merely "no choice
+made". A `->multiple()` filter's own empty-selection state already serves
+that purpose, so no "Any" is prepended for it.
+
+Above the list, one `InputChip` per **active** filter (a chip only appears
+once its value differs from cleared) shows the matching option's label —
+or, for a multiselect, its selected labels joined — with a delete affordance
+that clears just that filter (`setFilter(name, null)`), leaving the others
+untouched.
+
+`ResourceListProvider.filters` seeds every published filter's own
+`->default()` on construction, so a resource whose filter carries a default
+starts pre-narrowed on first load, matching what the panel itself would
+show a fresh visitor — call `clearFilters()` to see the unfiltered list.
+
+When a filter publishes `optionsUrl`, the same remote picker used by form
+selects opens with loading, empty, failure/retry and `hasMore` states. A
+single filter receives the same synthetic "Any" option as an inline one;
+remote multiselect keeps the sheet open while choices are toggled and commits
+them together with Save. `RestResourceDataSource` implements the optional
+`FilterOptionsDataSource` capability. Existing custom data sources remain
+source-compatible; they can opt in to remote filters by implementing it.
 
 ## Upload
 
@@ -793,10 +941,12 @@ wire up, and there never needs to be one. A directly-constructed
 - **No locale display names.** Chips show the raw locale code, uppercased
   — `AR`, not "Arabic" — matching this package's stance of not taking an
   `intl` dependency for this slice.
-- **Per-locale text direction inside the field is not modelled.** The
-  field renders in the panel's own direction (see RTL and i18n, below),
-  the same as every other field, regardless of which locale's chip is
-  selected.
+- **Per-locale direction is explicit, never guessed.** A node carrying
+  `direction: rtl|ltr` overrides the panel for that field or entry; absence
+  inherits. Declare the matching Filament `dir` attribute on each locale
+  field—the client deliberately does not maintain a locale-direction table.
+  The wrapper lives at `FieldRegistry`/`EntryRegistry`, so host-custom
+  builders receive a context already under the override too.
 - **Editing an official-plugin field per locale is out of scope.** An
   undotted field the plugin swaps by panel locale stays single-locale on
   mobile; see the Laravel README's Translatable section and its `doctor`
@@ -835,10 +985,13 @@ rows in a row produces two rows, not one.
 
 - **No reordering**, matching the repeater — this widget has never offered
   one for either array-valued field.
-- **All four gates are client hints.** See the Laravel README's Key/value
-  section for what "not enforced by the write path" means in practice, and
-  for the contrast with `disabled`, which this package's write path *does*
-  enforce.
+- **All four gates are server-enforced too.** The client still omits each
+  forbidden control so an ordinary user never discovers the rule through a
+  422. The Laravel write path also compares trusted defaults/stored values
+  and rejects crafted additions, removals, existing-value edits, or ambiguous
+  renames. A restricted KeyValue inside a repeater makes that owning repeater
+  read-only because its rows have no stable wire identity. See the Laravel
+  README's Key/value section for the exact matrix.
 
 ## Colour
 
@@ -1386,6 +1539,55 @@ name a state the user has to act on, not a fact about staleness:
   `UnsupportedSchemaVersionException` for one, and stale bytes must never be
   the reason `needsAppUpdate` fails to surface.
 
+## Background refresh
+
+When the server publishes `panel.poll`, `PanelShell` automatically applies its
+intervals to resource lists, record views, and the dashboard. Individual
+screens also read the interval carried by their `ResourceSchema`; a standalone
+`DashboardScreen` accepts `pollInterval` explicitly.
+
+Polling is conservative by design:
+
+- each timer has ±10% jitter and no two reads for one screen overlap;
+- covered routes and backgrounded apps do no work;
+- resource lists pause while drag-to-reorder is active;
+- returning to the foreground triggers one prompt revalidation;
+- transient background errors leave the last good content visible, while a
+  401 still becomes an authentication failure.
+
+`RestResourceDataSource` uses `FilamentConditionalTransport` when the host
+already supplies it. It keeps the last response and ETag in memory for each
+list query, detail record, and dashboard request; a 304 reuses that parsed
+body. A conditional 304 without a cached body safely falls back to an ordinary
+GET. A host with only `FilamentTransport` remains compatible and performs a
+normal GET on each interval.
+
+No `panel.poll` member means no timers, preserving the old behavior. The app
+requires no Reverb client or persistent background service unless the host
+chooses to provide one.
+
+For realtime invalidation, implement `FilamentEventTransport` over the
+Pusher-protocol client already selected by the application and pass it to
+`PanelShell(eventTransport: events)`. After loading the panel schema, configure
+that client from `panel.realtime`, authenticate each logical resource channel
+through its `authEndpoint`, and map `filament-mobile.changed` to
+`RealtimeEvent.changed`. Emit `RealtimeEvent.reconnected()` after a successful
+reconnect. Cancelling the stream returned by `events(channel)` must release
+that private-channel subscription; the host continues to own the shared
+socket itself.
+
+The socket carries invalidation hints only. Screens coalesce bursts and then
+use their existing authorized HTTP provider, so no event payload is rendered
+directly. List refreshes revalidate page 1 while preserving the current scroll
+position. Detail and dashboard keep their last successful content during a
+transient refresh failure. When both `panel.realtime` channels and
+`panel.poll` are available, push replaces the ordinary cadence and polling
+continues at 4× the declared interval as a quiet-connection watchdog. Surfaces
+without a usable adapter or channel keep the normal polling cadence.
+
+Include the socket client's current id as `X-Socket-ID` on mobile HTTP writes
+to prevent a successful local mutation from causing a duplicate refetch.
+
 The screens gate `isUnauthenticated` behind `status.isFailure`.
 `needsAppUpdate` is a provider-level flag the host consumes — no screen
 reads it — and setting it forces `status = failure`, so neither state can
@@ -1492,9 +1694,10 @@ build against this screen:
   cannot do arithmetic on it — a "trend arrow computed on device" feature
   would need the server to publish a second, numeric field, which it does
   not today.
-- **No polling or realtime.** The dashboard is exactly as fresh as the last
-  `load()`/pull-to-refresh; there is no timer built into `DashboardProvider`
-  and none is planned for this screen.
+- **No socket push.** When the server publishes `panel.poll`, the dashboard
+  revalidates on that interval; otherwise it remains exactly as fresh as the
+  last `load()`/pull-to-refresh. Reverb/WebSocket delivery is not part of this
+  phase.
 
 ## RTL and i18n
 
@@ -1528,6 +1731,19 @@ them — not a second value the host would have to thread through — which is
 the property that keeps this from being a third capability that ships
 published and unwired. A directly-constructed `ResourceSchema`, as in a
 test, defaults to `PanelDirection.ltr`.
+
+**A named field or entry may override that inherited answer.** The optional
+node-level `direction` parses to `ComponentDirection.ltr|rtl`; absence or an
+unknown value remains null and inherits the panel. `FieldRegistry` and
+`EntryRegistry` install the override before calling their built-in switch or a
+host-registered builder, so custom widgets can read the correct
+`Directionality` directly from the callback context. Repeater children pass
+through the same registry and may each override independently.
+
+Laravel publishes this from Filament's own `dir` attribute rather than
+guessing from content or locale. For a bilingual group, declare
+`extraInputAttributes(['dir' => 'rtl'])` on `caption.ar` and `ltr` on
+`caption.en`; an undeclared member continues to follow the panel.
 
 **Overlay routes get the same wrap, deliberately, not by inheritance.** A
 sheet, dialog, picker or dropdown menu pushed from a screen does not
@@ -1607,10 +1823,10 @@ proof this package understood the data.
 
 Known weaknesses, stated now:
 
-- **Per-field content direction is not modelled.** Direction follows the
-  panel, not the value — a panel whose locale is English but whose data
-  happens to be Arabic still lays out left-to-right, because the server has
-  no per-value answer to give.
+- **Direction is declared, not inferred from content.** An English panel with
+  undeclared Arabic data still lays that field out LTR. Publish the field's
+  `dir` attribute when its semantic direction differs from the panel; the
+  package deliberately does not guess from text or maintain a locale table.
 - **Text a host renders itself is not covered.** The isolate runs only
   where this package renders a server-supplied string; a host drawing its
   own widget from the same payload gets the raw, un-isolated string.

@@ -96,6 +96,43 @@
               }
             ]
           }
+        },
+        {
+          "type": "select",
+          "name": "role",
+          "label": "الدور",
+          "config": {
+            "options": [
+              {
+                "value": "editor",
+                "label": "محرر"
+              },
+              {
+                "value": "viewer",
+                "label": "مشاهد"
+              }
+            ],
+            "multiple": true
+          }
+        },
+        {
+          "type": "select",
+          "name": "trashed",
+          "label": "المحذوفون",
+          "config": {
+            "options": [
+              {
+                "value": "1",
+                "label": "مع المحذوفين"
+              },
+              {
+                "value": "0",
+                "label": "المحذوفون فقط"
+              }
+            ],
+            "placeholder": "بدون محذوفين"
+          },
+          "default": "1"
         }
       ],
       "relations": [
@@ -131,6 +168,7 @@
             {
               "type": "text",
               "name": "name",
+              "direction": "rtl",
               "label": "الاسم",
               "columnSpan": 6,
               "rules": {

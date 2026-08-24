@@ -76,6 +76,7 @@ class _ThrowingSource implements ResourceDataSource {
     String? sort,
     String? direction,
     bool reorder = false,
+    Map<String, Object?> filters = const {},
   }) async => const PaginatedRecords(
     records: [],
     meta: PageMeta(currentPage: 1, lastPage: 1, perPage: 20, total: 0),
@@ -981,6 +982,45 @@ void main() {
         );
       });
 
+      testWidgets(
+        'a node direction overrides the panel for its control and overlay',
+        (tester) async {
+          await tester.pumpWidget(
+            _rtlHost(
+              Builder(
+                builder: (context) => FieldRegistry.defaults().build(
+                  context,
+                  SchemaComponent.fromJson(const {
+                    'type': 'date',
+                    'name': 'english_date',
+                    'label': 'English date',
+                    'direction': 'ltr',
+                  }, 'form[0]'),
+                  const FieldState(
+                    value: null,
+                    onChanged: _noop,
+                    enabled: true,
+                  ),
+                ),
+              ),
+            ),
+          );
+
+          expect(
+            Directionality.of(tester.element(find.byType(InputDecorator))),
+            TextDirection.ltr,
+          );
+
+          await tester.tap(find.byType(InputDecorator));
+          await tester.pumpAndSettle();
+
+          expect(
+            Directionality.of(tester.element(find.byType(DatePickerDialog))),
+            TextDirection.ltr,
+          );
+        },
+      );
+
       testWidgets('the time field\'s picker resolves the field\'s direction', (
         tester,
       ) async {
@@ -1500,6 +1540,93 @@ void main() {
       },
     );
   });
+
+  group('ResourceListScreen filter sheet (P24) — overlay direction and '
+      'width', () {
+    ResourceSchema filterResource() => ResourceSchema(
+      key: 'posts',
+      labels: const ResourceLabels(singular: 'Post', plural: 'Posts'),
+      filters: [
+        SchemaComponent.fromJson(const {
+          'type': 'select',
+          'name': 'status',
+          'label': 'Status',
+          'config': {
+            'options': [
+              {'value': 'draft', 'label': 'Draft'},
+            ],
+          },
+        }, 'filters[0]'),
+      ],
+      direction: PanelDirection.rtl,
+    );
+
+    testWidgets('the filter bottom sheet at compact width resolves the same '
+        'direction as the screen that opened it, with no overflow', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(400, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final provider = ResourceListProvider(
+        source: _ThrowingSource(),
+        resource: filterResource(),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(home: ResourceListScreen(provider: provider)),
+      );
+      final screenDirection = Directionality.of(
+        tester.element(find.text('Posts')),
+      );
+
+      await tester.tap(find.byIcon(Icons.filter_list));
+      await tester.pumpAndSettle();
+
+      final sheetDirection = Directionality.of(
+        tester.element(find.text('Status')),
+      );
+
+      expect(screenDirection, TextDirection.rtl);
+      expect(
+        sheetDirection,
+        screenDirection,
+        reason:
+            'a bottom sheet opened from an RTL screen must render RTL '
+            'too — same overlay-route trap as the sort sheet above',
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the filter dialog at expanded width resolves the same RTL '
+        'direction, with no overflow', (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final provider = ResourceListProvider(
+        source: _ThrowingSource(),
+        resource: filterResource(),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(home: ResourceListScreen(provider: provider)),
+      );
+      final screenDirection = Directionality.of(
+        tester.element(find.text('Posts')),
+      );
+
+      await tester.tap(find.byIcon(Icons.filter_list));
+      await tester.pumpAndSettle();
+
+      expect(
+        Directionality.of(tester.element(find.byType(Dialog))),
+        screenDirection,
+      );
+      expect(tester.takeException(), isNull);
+    });
+  });
 }
 
 void _noop(Object? value) {}
@@ -1516,6 +1643,7 @@ class _ReorderableSource extends _ThrowingSource {
     String? sort,
     String? direction,
     bool reorder = false,
+    Map<String, Object?> filters = const {},
   }) async => const PaginatedRecords(
     records: [
       ResourceRecord(id: 1, attributes: {'name': 'Slide 1'}),

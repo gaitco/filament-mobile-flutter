@@ -107,6 +107,8 @@ class FormValues {
       BooleanComponent(:final defaultValue) => defaultValue,
       DateComponent(:final defaultValue) => defaultValue,
       ColorComponent(:final defaultValue) => defaultValue,
+      MapPointComponent(:final defaultValue) => defaultValue?.toJson(),
+      PhoneComponent(:final defaultValue) => defaultValue,
       _ => null,
     };
   }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../schema/schema_component.dart';
+import '../ui/component_direction.dart';
 import 'field_state.dart';
 import 'fields/field_widgets.dart';
 
@@ -35,11 +36,24 @@ class FieldRegistry {
     SchemaComponent component,
     FieldState state,
   ) {
+    return buildWithComponentDirection(
+      context,
+      component.direction,
+      (fieldContext) => _build(fieldContext, component, state),
+    );
+  }
+
+  Widget _build(
+    BuildContext context,
+    SchemaComponent component,
+    FieldState state,
+  ) {
     final custom = _builders[component.type];
     if (custom != null) return custom(context, component, state);
 
     return switch (component) {
       TextComponent() => TextFieldWidget(component: component, state: state),
+      PhoneComponent() => PhoneFieldWidget(component: component, state: state),
       NumberComponent() => NumberFieldWidget(
         component: component,
         state: state,
@@ -99,6 +113,7 @@ class FieldRegistry {
         state: state,
         registry: this,
       ),
+      MapPointComponent() => UnsupportedFieldWidget(component: component),
       // A layout container holds no value, so no single FieldState applies to
       // it — the caller walks the tree and calls build() once per leaf field.
       // An infolist entry reaching a form screen renders nothing: P1 owns
@@ -140,5 +155,9 @@ class FieldRegistry {
     'tags',
     'keyvalue',
     'repeater',
+    'phone',
+    // Core renders an honest extension-required card; the optional maps
+    // companion overrides this type with the interactive map.
+    'map_point',
   };
 }

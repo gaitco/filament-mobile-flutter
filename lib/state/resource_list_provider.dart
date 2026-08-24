@@ -1,9 +1,11 @@
 import 'package:flutter/foundation.dart';
 
 import '../data/resource_data_source.dart';
+import '../data/options_page.dart';
 import '../data/resource_record.dart';
 import '../ports/filament_transport.dart';
 import '../schema/resource_schema.dart';
+import '../schema/schema_component.dart';
 import 'load_status.dart';
 
 /// Owns one resource's list: records, search term, active sort, pagination.
@@ -12,14 +14,50 @@ import 'load_status.dart';
 /// untestable without pumping fake async, and the screen is where the keystroke
 /// actually arrives.
 class ResourceListProvider extends ChangeNotifier {
-  ResourceListProvider({
-    required ResourceDataSource source,
-    required this.resource,
-  }) : _source = source,
-       _activeSort = resource.defaultSort;
+  ResourceListProvider({required this.source, required this.resource})
+    : _activeSort = resource.defaultSort,
+      _filters = _seedFilters(resource);
 
-  final ResourceDataSource _source;
+  final ResourceDataSource source;
   final ResourceSchema resource;
+
+  /// Seeds filter state from each filter node's declared `default` (P24) —
+  /// so a freshly opened list shows the same default view the web panel
+  /// does. This is belt-and-braces, NOT the only line of defence: the
+  /// server applies each filter node's default too (Task 2), so a stale or
+  /// older client still sees a filtered list even without this. Do not
+  /// delete this seeding on the strength of the server also doing it, or
+  /// vice versa — both exist on purpose.
+  ///
+  /// Filter nodes are always published as a `select`-shaped
+  /// [SelectComponent] (`PublishedFilter::toNode()`), never any other
+  /// component type — the `is! SelectComponent` guard is defensive, not
+  /// reachable today.
+  static Map<String, Object?> _seedFilters(ResourceSchema resource) {
+    final seeded = <String, Object?>{};
+    for (final node in resource.filters) {
+      if (node is! SelectComponent) continue;
+      final name = node.name;
+      final defaultValue = node.defaultValue;
+      if (name == null || defaultValue == null) continue;
+
+      final seedable = defaultValue is List
+          ? [for (final value in defaultValue) '$value']
+          : defaultValue;
+
+      // Seeding is the SECOND write point into [_filters], so it owes the
+      // same canonicalisation [setFilter] applies at the first: an empty
+      // `List` is no filter, not a filter whose value is empty. Left
+      // verbatim, a publishable `->multiple()->default([])` produced a badge
+      // reading 1 and a blank `InputChip` with a delete icon, for a wire
+      // value (`filter[x]=`) that filters nothing. Absent, not `''` — the
+      // node has no default to override, so there is nothing to clear.
+      if (seedable is List && seedable.isEmpty) continue;
+
+      seeded[name] = seedable;
+    }
+    return seeded;
+  }
 
   LoadStatus _status = LoadStatus.initial;
   List<ResourceRecord> _records = const [];
@@ -34,6 +72,20 @@ class ResourceListProvider extends ChangeNotifier {
   int _page = 1;
   String _searchTerm = '';
   ResourceSort? _activeSort;
+
+  /// name => `String` (single value) or `List<String>` (multiple) — see
+  /// [_seedFilters] for how this starts, and [ResourceDataSource.list]'s
+  /// doc for how a `List<String>` value is put on the wire.
+  ///
+  /// An empty string `''` is a distinct third state: EXPLICITLY cleared, as
+  /// opposed to a key simply absent from this map. This matters because the
+  /// server (Task 3, mobile-core `ListQuery::filters()`) treats an OMITTED
+  /// filter as "apply this filter's declared default" and only an EXPLICIT
+  /// empty value (`?filter[status]=`) as "any". If clearing a filter just
+  /// removed its key, a filter that carries a `default` would be
+  /// unclearable from the client — the server would silently reinstate the
+  /// default on the very next request. See [setFilter]/[clearFilters].
+  Map<String, Object?> _filters;
 
   /// True while the list is in drag-to-reorder mode (P18) — see
   /// [enterReorderMode]. The screen swaps its whole body for a
@@ -70,6 +122,29 @@ class ResourceListProvider extends ChangeNotifier {
   String get searchTerm => _searchTerm;
   ResourceSort? get activeSort => _activeSort;
 
+  /// name => `String` | `List<String>` — a SNAPSHOT copy at the moment of
+  /// the call, not a live view: both [setFilter] and [clearFilters]
+  /// reassign the backing map rather than mutate it in place, so a
+  /// previously-returned value never reflects a later change. Re-read this
+  /// getter after [notifyListeners] fires (a listening widget already does,
+  /// on every rebuild) rather than holding onto one call's result.
+  Map<String, Object?> get filters => Map.unmodifiable(_filters);
+
+  /// Counts every entry in [filters], INCLUDING a filter node's seeded
+  /// `default` that the user has not touched — so a resource with two
+  /// defaulted filters reports `2` from the very first frame, before any
+  /// interaction. This is deliberate, not a side effect of [_seedFilters]:
+  /// Filament's own web panel shows an indicator chip for a defaulted
+  /// filter too, so this is parity with it, and a default the user cannot
+  /// see applied is worse than a badge counting one they didn't set
+  /// themselves. Task 5's filter-count badge should read this as-is rather
+  /// than trying to subtract seeded defaults back out.
+  ///
+  /// Does NOT count an explicitly-cleared filter (value `''`, see
+  /// [_filters]'s doc) — a cleared filter is inactive by definition, even
+  /// though its key stays in the map.
+  int get activeFilterCount => _filters.values.where((v) => v != '').length;
+
   /// True while a drag-to-reorder session (P18) is open — see
   /// [enterReorderMode].
   bool get isReordering => _isReordering;
@@ -83,7 +158,11 @@ class ResourceListProvider extends ChangeNotifier {
 
   Future<void> load() => _fetchFirstPage();
 
-  Future<void> refresh() => _fetchFirstPage();
+  /// Refetches page one. [keepPrevious] is used by background polling so an
+  /// unchanged or transiently-failed refresh never flashes a skeleton over a
+  /// list the user was already reading.
+  Future<void> refresh({bool keepPrevious = false}) =>
+      _fetchFirstPage(keepPrevious: keepPrevious);
 
   /// While [isReordering], this refetches the reorder-ordered list WITH the
   /// term (`?reorder=1&search=...`) instead of the hidden paginated list —
@@ -101,10 +180,69 @@ class ResourceListProvider extends ChangeNotifier {
     return _fetchFirstPage();
   }
 
-  Future<void> _fetchFirstPage() async {
-    final requestId = ++_requestId;
+  /// Sets or clears one filter (P24) and refetches page one — the
+  /// reorder-ordered page instead, while [isReordering], same as [search].
+  ///
+  /// Clearing is explicit, never implicit: `value: null` does NOT remove
+  /// `name` from [_filters] — it records `''`, the same "any" value the
+  /// server itself recognises (`ListQuery::filters()`). Removing the key
+  /// instead would mean OMITTING it, which the server reads as "apply this
+  /// filter's default" — so a defaulted filter would silently reinstate
+  /// itself the moment the client tried to clear it. See [_filters]'s doc.
+  ///
+  /// An empty `List` — every checkbox of a multiselect filter deselected —
+  /// is canonicalised to `''` too, the SAME cleared value `null` produces,
+  /// rather than stored as-is: `[]` and `''` both mean "no filter", and
+  /// leaving `[]` as a second representation would give every reader of
+  /// [_filters] (the chip row, [activeFilterCount], the wire encoder) a
+  /// state to special-case instead of one to just check `!= ''` against.
+  /// The wire output is unchanged either way — `ResourceDataSource.list`'s
+  /// query builder already emits the bare `filter[name]=` for both an empty
+  /// `List` and an empty `String`.
+  Future<void> setFilter(String name, Object? value) {
+    final cleared = value == null || (value is List && value.isEmpty);
+    _filters = {..._filters, name: cleared ? '' : value};
+    return _isReordering ? _fetchReorderedPage() : _fetchFirstPage();
+  }
 
-    _status = LoadStatus.loading;
+  /// Clears EVERY filter this resource's schema publishes — including ones
+  /// never touched and ones with no seeded default — to the explicit `''`
+  /// "any" value, and refetches: the reorder-ordered page instead while
+  /// [isReordering]. Same reasoning as [setFilter]: writing `''` for every
+  /// published filter name (rather than emptying the map) is what stops
+  /// the server from reinstating any of their defaults on the next request.
+  Future<void> clearFilters() {
+    _filters = {
+      for (final node in resource.filters)
+        if (node is SelectComponent && node.name != null) node.name!: '',
+    };
+    return _isReordering ? _fetchReorderedPage() : _fetchFirstPage();
+  }
+
+  /// Searches one filter's remote options through an optional source
+  /// capability. Existing custom [ResourceDataSource] implementations remain
+  /// source-compatible; opening a remote filter on one reports a real error
+  /// state instead of pretending the server returned no matches.
+  Future<OptionsPage> searchFilterOptions(String filter, String query) {
+    final source = this.source;
+    if (source is! FilterOptionsDataSource) {
+      throw UnsupportedError(
+        'This data source does not implement FilterOptionsDataSource.',
+      );
+    }
+
+    return (source as FilterOptionsDataSource).filterOptions(
+      resource.key,
+      filter: filter,
+      query: query,
+    );
+  }
+
+  Future<void> _fetchFirstPage({bool keepPrevious = false}) async {
+    final requestId = ++_requestId;
+    final preserve = keepPrevious && _status.isSuccess;
+
+    if (!preserve) _status = LoadStatus.loading;
     _errorMessage = null;
     _isUnauthenticated = false;
     // A page-two fetch may still be in flight; it will drop its own result,
@@ -113,16 +251,19 @@ class ResourceListProvider extends ChangeNotifier {
     _loadMoreFailed = false;
     // Skeleton geometry: the screen renders fake cards while loading, so the
     // real records must not linger underneath and then jump.
-    _records = const [];
-    notifyListeners();
+    if (!preserve) {
+      _records = const [];
+      notifyListeners();
+    }
 
     try {
-      final page = await _source.list(
+      final page = await source.list(
         resource.key,
         page: 1,
         search: _searchTerm,
         sort: _activeSort?.key,
         direction: _activeSort?.direction,
+        filters: _filters,
       );
 
       if (requestId != _requestId) return;
@@ -138,7 +279,9 @@ class ResourceListProvider extends ChangeNotifier {
         _isUnauthenticated = true;
       }
       _errorMessage = messageOf(e);
-      _status = LoadStatus.failure;
+      _status = preserve && !_isUnauthenticated
+          ? LoadStatus.success
+          : LoadStatus.failure;
     }
 
     notifyListeners();
@@ -166,12 +309,13 @@ class ResourceListProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final page = await _source.list(
+      final page = await source.list(
         resource.key,
         page: _page + 1,
         search: _searchTerm,
         sort: _activeSort?.key,
         direction: _activeSort?.direction,
+        filters: _filters,
       );
 
       // Appending a stale page would splice the previous query's rows into the
@@ -199,7 +343,7 @@ class ResourceListProvider extends ChangeNotifier {
 
   /// Opens a drag-to-reorder session (P18): fetches the FULL, unpaginated
   /// list ordered by the resource's declared reorder column
-  /// (`_source.list(reorder: true)`), never the paginated rows already on
+  /// (`source.list(reorder: true)`), never the paginated rows already on
   /// screen — a drag has to be able to place a record anywhere in the whole
   /// set, not just within whichever page happened to be loaded. Sends the
   /// list's current [searchTerm] along — a term already active on the
@@ -224,10 +368,11 @@ class ResourceListProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final page = await _source.list(
+      final page = await source.list(
         resource.key,
         reorder: true,
         search: _searchTerm,
+        filters: _filters,
       );
 
       // Lost the race — [exitReorderMode]/[saveReorder] moved on (bumping
@@ -306,7 +451,7 @@ class ResourceListProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await _source.reorder(resource.key, [
+      await source.reorder(resource.key, [
         for (final record in _reorderedRecords) record.id,
       ]);
       _isSavingReorder = false;

@@ -5,6 +5,7 @@ import '../data/resource_record.dart';
 import '../schema/media_set.dart';
 import '../schema/rich_document.dart';
 import '../schema/schema_component.dart';
+import 'component_direction.dart';
 import 'entries/entry_widgets.dart';
 import 'entries/rich_entry_tile.dart';
 
@@ -55,6 +56,18 @@ class EntryRegistry {
     SchemaComponent component,
     ResourceRecord record,
   ) {
+    return buildWithComponentDirection(
+      context,
+      component.direction,
+      (entryContext) => _build(entryContext, component, record),
+    );
+  }
+
+  Widget _build(
+    BuildContext context,
+    SchemaComponent component,
+    ResourceRecord record,
+  ) {
     final custom = _builders[component.type];
     if (custom != null) return custom(context, component, record);
 
@@ -66,11 +79,22 @@ class EntryRegistry {
         ],
       ),
       EntryComponent() => _entry(component, record),
+      MapPointComponent() => _unsupportedKnown(context, component),
       UnknownComponent() => _unknown(context, component, record),
       // A form field reaching an infolist screen renders nothing: P1 shows
       // only the infolist, and P2 owns forms.
       _ => const SizedBox.shrink(),
     };
+  }
+
+  Widget _unsupportedKnown(BuildContext context, SchemaComponent component) {
+    return Card(
+      child: ListTile(
+        leading: const Icon(Icons.extension_off_outlined),
+        title: Text(component.label ?? component.name ?? component.type),
+        subtitle: Text('Renderer not registered: ${component.type}'),
+      ),
+    );
   }
 
   Widget _entry(EntryComponent component, ResourceRecord record) {

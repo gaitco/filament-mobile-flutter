@@ -44,6 +44,30 @@ the server itself normalises an unrecognised value to; a client should
 never treat the key's absence as an error. `laravel-panel.json` is
 regenerated from a real request and does carry both keys.
 
+### Node-level direction overrides
+
+Any named form field or infolist entry may override the panel direction with
+one additive key:
+
+```jsonc
+{ "type": "text", "name": "caption.ar", "direction": "rtl" }
+```
+
+The value is the same closed set: exactly `ltr` or `rtl`. Absence, including
+for every document produced before this feature, means inherit the surrounding
+panel direction. A client must apply the override around the entire component,
+not only its editable text, so labels, helper/error text, menus, pickers,
+repeater children, and host-custom renderers agree.
+
+Laravel derives it from the component's own HTML declaration. A valid
+`getExtraInputAttributes()['dir']` wins, then a valid
+`getExtraAttributes()['dir']` is the fallback. This matches browser
+specificity and supports both ordinary Filament inputs and custom component
+classes without a mobile-only configuration API. `auto`, malformed values,
+and throwing attribute closures publish nothing and therefore inherit.
+Layout containers do not publish a node override because the form renderer
+flattens them; declare direction on the named fields they contain.
+
 ## `panel.locales` and the node-level `translatable` key
 
 P17 adds one more `panel` key and one more form-node key, both additive:
@@ -93,13 +117,16 @@ carries — and groups sibling `translatable` leaves that share the same
 head into one chip-switched field instead of rendering N stacked
 "Ar"/"En"-labelled fields.
 
-**`panel.json` and `laravel-panel.json` carry neither key, deliberately**
+**`panel.json` and `laravel-panel.json` carry neither `panel.locales` nor a
+node-level `translatable` key, deliberately**
 — the same "server predating this feature" fixture role
 `panel.locale`/`direction` already established above: no fixture behind
 either golden has a real `HasTranslations` model, a registered
 translatable plugin, or a `filament-mobile.locales` config value, so both
 keys staying absent from both goldens is a structural guarantee, not a
-maintenance step someone can forget.
+maintenance step someone can forget. `panel.json` does carry one independent
+node-level `direction` fixture on `users.name`; other nodes omit it and prove
+inheritance remains the default.
 
 ## Reordering (`resource.reorder`)
 
@@ -239,6 +266,148 @@ resource's own base query, which is also what performs the membership check
 above — and runs the CASE update on primary keys, the same way Filament's own
 Livewire table does (its sortable list is keyed by model key, not by a
 custom route key).
+
+## Table filters (`resource.filters`)
+
+P24 fills a key that has existed in the contract since P0 — `filters`, until
+now always `[]`. It lists every filter the resource's own `table()->filters()`
+declares and this slice can serve, further narrowed by
+`mobile()->filters(['name', …])` when the host calls it. Two worked examples,
+each a shape the server actually emits — no classified filter ever carries
+both `config.multiple` and `config.placeholder` at once (see below):
+
+A `SelectFilter->multiple()` (or a `MultiSelectFilter`, which hardcodes the
+same thing):
+
+```jsonc
+{
+  "type": "select",
+  "name": "role",
+  "label": "Role",
+  "config": {
+    "options": [
+      { "value": "editor", "label": "Editor" },
+      { "value": "viewer", "label": "Viewer" }
+    ],
+    "multiple": true
+  }
+}
+```
+
+A `TernaryFilter` (and `TrashedFilter`, which extends it) — always shaped as
+a select whose two options are the fixed `1`/`0` pair, carrying the filter's
+own true/false labels and placeholder, never a separate `"ternary"` node on
+the wire:
+
+```jsonc
+{
+  "type": "select",
+  "name": "trashed",
+  "label": "Trashed",
+  "config": {
+    "options": [
+      { "value": "1", "label": "With trashed" },
+      { "value": "0", "label": "Only trashed" }
+    ],
+    "placeholder": "Without trashed"
+  },
+  "default": "1"
+}
+```
+
+- `type` is always `"select"`, the same node shape a form/infolist select
+  already publishes, reused rather than invented.
+- `config.options` comes from a `SelectFilter`'s inline `->options()`.
+  `config.multiple` and `config.placeholder` are present only when the
+  filter declares them — the same omit-when-absent rule every other node
+  in this contract follows. **`default`, when present, is a sibling of
+  `config` at the node's top level — not nested inside it** — the same
+  place a resource's own `sorts[].default` lives.
+- A list over `filament-mobile.options_inline_max` (default 50), or an empty
+  option set on a searchable filter, publishes `config.optionsUrl` plus
+  `searchable: true` instead of `config.options`. The client posts
+  `{ "filter": "role", "q": "edit" }` to that URL and receives the same
+  `{ "options": [{ "value": ..., "label": ... }], "hasMore": false }`
+  page used by remote form selects. Large static lists are searched locally;
+  relationship/custom search filters run Filament's own search callback.
+  A non-searchable filter with no options is omitted. A `QueryBuilder` and
+  any other custom filter class are omitted too — not translated or partially
+  served.
+- `mobile()->filters(['name', …])` mirrors `mobile()->actions()`: it names
+  which of the table's filters are opted into mobile at all. The default
+  (no call) publishes every filter this slice CAN serve. A name that
+  resolves to nothing — wrong spelling, hidden from this request's
+  `->visible()`, or a filter kind this slice refuses — is **silently
+  omitted from the wire**, never thrown; `filament-mobile:doctor` reports
+  every such omission by name.
+- Order follows the table's own filter declaration order, filtered by
+  `$only` when narrowed.
+
+`panel.json`'s `users` resource carries three host-shaped filters between
+them exercising a plain select, `config.multiple`, a ternary's
+`config.placeholder`, and a top-level `default` — end to end, not merely
+asserted in isolation.
+
+### Submitting filters on the wire
+
+The schema key above is only half the feature; a client that reads it and
+guesses the query string will get the clear rule wrong. The list endpoint
+(`GET /{resource}`, `?reorder=1` mode included) reads:
+
+```
+?filter[status]=draft            # single-value filter
+?filter[tags][0]=a&filter[tags][1]=b   # config.multiple: true — an indexed array
+?filter[status]=                 # explicitly "any" — see the clear rule below
+```
+
+**The clear rule — get this wrong and a defaulted filter can never be turned
+off.** The server distinguishes three states, not two:
+
+| Request | Meaning |
+|---|---|
+| the filter's name is **absent** from `?filter[...]` | apply this filter's published `default` (nothing, if it has none) |
+| `?filter[name]=` — named, with an empty value | **any** — no narrowing, and the only way to override a `default` |
+| `?filter[name]=value` | narrow to that value |
+
+An empty value clears a `config.multiple` filter too: a query string cannot
+express an empty list, so `?filter[tags]=` is read as "any" for both arities
+rather than as a type error. This is the one deliberate exception to the
+matrix below.
+
+A client that clears a filter by dropping its key from the query string will
+watch the server reinstate the default on the very next request. Send the
+bare `filter[name]=`.
+
+**The 422 matrix.** `?filter[...]` is validated against exactly what
+`/schema` published for **this** requester — a filter hidden from them by a
+policy is an unknown filter here too, so probing cannot tell "hidden" from
+"never declared":
+
+| Request | Response |
+|---|---|
+| `?filter=draft` (not an array) | `422 [filter] must be an array.` |
+| a name `/schema` did not publish | `422 Unknown filter [{name}].` |
+| an array for a single-value filter | `422 Filter [{name}] takes a single value.` |
+| a scalar for a `config.multiple` filter (except the empty one above) | `422 Filter [{name}] takes a list of values.` |
+| a value outside the published `config.options` | `422 Unknown value for filter [{name}].` |
+
+For a dynamic remote filter there is no complete `config.options` whitelist
+to publish. Its values still must have the declared scalar/list shape; the
+resource's own Filament filter remains the authority that applies the key.
+An over-cap static remote filter retains its full server-side whitelist and
+rejects unknown values exactly like an inline filter.
+
+A published `default` always satisfies this matrix — it is normalised to the
+node's own arity and stripped of values the options do not offer before
+publication — so echoing it back is always safe.
+
+**`?filter[...]` is a list-endpoint parameter only.** The relation endpoint
+(`GET /{resource}/{record}/{relation}`) and the record endpoint
+(`GET /{resource}/{record}`) never read it: no validation, no application, no
+422 on an unknown name. The record endpoint does still resolve through the
+resource's filters with an *empty* state, which is what keeps a soft-deleted
+record reachable at its own URL — but note it can 404 a record that a
+non-select filter's `default` hides, matching the web panel.
 
 ## Reading `hidden` and `disabled` as a client
 
@@ -646,6 +815,72 @@ client that ignores the hints will not be corrected on submit.
 - **`timezone` and `displayFormat`**: unchanged from the bounds release — the
   client renders device-local and in its own format.
 
+## The map point and phone fields
+
+The optional `dotswan/filament-map-picker` plugin publishes an editable map as
+`map_point` and its infolist entry as `map_point_entry`. Both read the same
+single-point value:
+
+```jsonc
+{
+  "type": "map_point",
+  "name": "location",
+  "config": {
+    "default": {"lat": 30.0444, "lng": 31.2357},
+    "zoom": 12,
+    "minZoom": 3,
+    "maxZoom": 19,
+    "draggable": true,
+    "clickable": true,
+    "showMarker": true,
+    "tilesUrl": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    "attribution": "© OpenStreetMap contributors"
+  }
+}
+```
+
+The value is either null/absent or exactly `{"lat": number, "lng": number}`.
+Numeric strings in stored plugin state are tolerated on read and normalised to
+JSON numbers before publication; a client sends numbers. Plugin-only GeoJSON
+never travels. A GeoMan-enabled field is omitted entirely, as is a map whose
+own state path is not a persisted model attribute (the common split
+latitude/longitude callback pattern), because either would accept a write that
+cannot round-trip without data loss. Both refusals are doctor diagnostics.
+
+Map config values are presentation and interaction hints, not write
+authorization. `map_point_entry` carries only the tile URL, attribution, and
+zoom it needs for read-only display. Rendering maps is an optional client
+extension; recognizing the type is mandatory so an absent extension can be
+reported visibly rather than treated as an unknown contract node.
+
+The optional `ysfkaya/filament-phone-input` field publishes as `phone`:
+
+```jsonc
+{
+  "type": "phone",
+  "name": "phone",
+  "config": {
+    "format": "e164",
+    "defaultCountry": "EG",
+    "onlyCountries": ["EG", "SA"]
+  }
+}
+```
+
+Its value is a string and round-trips verbatim. `format` is a closed set:
+`e164`, `international`, `national`, or `rfc3966`, defaulting to `e164` for an
+unrecognised vendor value. When `countryPath` is present, `format` is
+`national`, matching the plugin's dehydration behavior; `excludeCountries`
+may appear instead of or alongside the allow list. These values are hints.
+The plugin's resolved Laravel phone rule remains the authoritative write gate
+and returns an ordinary field-keyed 422.
+
+A phone field whose IP lookup remains enabled is omitted: that lookup requires
+a Livewire round trip unavailable to a mobile client. The deterministic mobile
+shape is `disableLookup()` plus `defaultCountry()`. Client-side formatting and
+validation, a country picker, geocoding, place search, keyed/offline tiles, and
+GeoJSON drawing are outside this vocabulary.
+
 ## The color field
 
 A `ColorPicker::make('accent')` publishes a `color` node:
@@ -788,20 +1023,30 @@ A `KeyValue::make('meta')` publishes a `keyvalue` node. The value is a
 }
 ```
 
-**The four boolean keys are client hints, not a server-enforced
-permission.** `addable`/`deletable` say whether a renderer should offer an
+**The four boolean keys are both rendering instructions and server-enforced
+permissions.** `addable`/`deletable` say whether a renderer should offer an
 Add/Remove control per pair; `editableKeys`/`editableValues` say whether a
 row's key or value cell should render as an input at all versus plain,
 unfocusable text. All four default to `true`, matching
-`Filament\Forms\Components\KeyValue`'s own vendor defaults. **A client should
-honour all four by *not drawing* the corresponding control, but must not
-assume the server would refuse a payload that ignores them** — the field's
-own rule is `array` and nothing narrower, so a crafted request can add,
-remove or rename a key an `editableKeys: false` gate says it should not be
-able to, and the write path persists it verbatim. This is the same class of
-statement `contract/README.md` already makes about the repeater's
-`addable`/`deletable` — a client affordance, not a server rule — extended
-here to all four gates rather than two.
+`Filament\Forms\Components\KeyValue`'s own vendor defaults.
+
+On create, the server compares the submitted map with the form's trusted
+defaults. On update, it compares with the record's cast stored map. New keys
+are rejected when `addable` is false, missing keys when `deletable` is false,
+and changes to surviving values when `editableValues` is false. A map has no
+row identity, so a rename cannot be distinguished from one removal plus one
+addition; when `editableKeys` is false the server conservatively rejects any
+request containing both operations. Pure adds/removes still obey their own
+independent gates. A permission closure that cannot be evaluated fails the
+write closed with a field-keyed 422.
+
+The field's validation rule remains `array` and nothing narrower. These
+operation permissions are a trusted-state comparison after validation, not
+a claim that Laravel's array rule can encode editing history. When a
+restricted `keyvalue` is nested in either a JSON or relationship repeater,
+the owning repeater publishes `config.readOnly: true`; its list rows have no
+stable identity with which to perform this comparison safely. A nested
+`keyvalue` with all four gates open does not impose that restriction.
 
 **Not on the wire, deliberately:** reordering. The repeater publishes
 `config.reorderable`; `keyvalue` publishes nothing equivalent, because this
@@ -968,9 +1213,11 @@ gate sequence: a `403` or `404` always wins over a `422`, because a
 validation error must never leak whether a relation exists for a record the
 caller cannot see. Against a relation that declares nothing, `?search=` is
 inert but an *undeclared sort key still 422s* — the sort parameter claimed
-a capability, the search parameter did not. Filters stay out, permanently:
-the same ruling the resource level already publishes `'filters' => []`
-under.
+a capability, the search parameter did not. **A relation block carries no
+`filters` key of its own — P24 (see `## Table filters` above) adds that key
+only at the resource level.** A relation manager's own `table()->filters()`,
+if it declares any, is not read; this is scope this slice has not reached
+yet, not a permanent ruling.
 
 **An absent `relations` key means a server predating P6d — read it as no
 relations, never as an error.** A client must not distinguish "the server
@@ -1096,7 +1343,7 @@ key beside the column's own raw value:
   "Cards", for the full reasoning and the `doctor` diagnostic that names
   this combination.
 
-## `ETag` / `If-None-Match` on `/schema`
+## `ETag` / `If-None-Match` on reads
 
 `GET /schema` sends a **weak** `ETag` (`W/"<sha1 of the built document>"`) on
 every response, computed before `_warnings` is attached — `_warnings` is
@@ -1112,6 +1359,65 @@ or strong form of the value, and `*` (unconditional match, RFC 7232 §3.2).
 Neither golden fixture (`panel.json`, `laravel-panel.json`) is affected —
 the `ETag` is a response header, not a document field, so the body a
 client parses on a `200` is unchanged.
+
+The same weak content-validator behavior applies to resource lists, record
+details, and `/dashboard`. These runtime payloads hash the actual response
+document. A conditional client may retain the last successful body per full
+path and query, send its ETag on the next read, and reuse the retained body on
+304. A 304 without a retained body must be retried as an ordinary GET.
+
+## Optional `panel.poll`
+
+The server may publish positive integer intervals, in seconds, that ask a
+client to revalidate an open surface:
+
+```json
+{
+  "panel": {
+    "poll": {
+      "lists": 15,
+      "detail": 15,
+      "dashboard": 5
+    }
+  }
+}
+```
+
+The whole member is optional. Absence means no automatic polling, and clients
+that do not recognise it continue to work. Values are bounded to 1–3600.
+Polling changes freshness only: authorization, response shapes, and writes
+continue through their existing endpoints.
+
+## Optional Reverb invalidation
+
+An opted-in server may publish public Pusher-protocol connection settings at
+`panel.realtime`:
+
+```json
+{
+  "driver": "reverb",
+  "key": "public-app-key",
+  "host": "ws.example.com",
+  "port": 443,
+  "scheme": "wss",
+  "authEndpoint": "/broadcasting/auth"
+}
+```
+
+The Reverb secret is never part of the contract. An authorized, opted-in
+resource may also publish a logical private-channel name such as
+`"channel": "mobile.orders"`; absence means no socket subscription for that
+resource. Clients authenticate the private channel through `authEndpoint` and
+map `filament-mobile.changed` events with the minimal body below to an
+ordinary authorized HTTP revalidation:
+
+```json
+{ "key": "orders", "id": 42, "event": "updated" }
+```
+
+The event is an invalidation hint, never record data. A client must not render
+its fields directly. If `panel.poll` is also present, it remains a bounded
+fallback for resources without channels and for connection gaps.
 
 ## Reading `rules.numeric` and `rules.messages` as a client
 

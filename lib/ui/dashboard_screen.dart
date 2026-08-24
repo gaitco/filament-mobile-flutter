@@ -1,14 +1,21 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../dashboard/dashboard_data.dart';
 import '../ports/filament_strings.dart';
+import '../ports/filament_event_transport.dart';
 import '../ports/panel_view_state.dart';
 import '../schema/resource_schema.dart' show PanelDirection;
 import '../state/dashboard_provider.dart';
+import '../state/polling_signals.dart';
+import '../state/realtime_signals.dart';
 import 'bidi_text.dart';
 import 'layout.dart';
 import 'material_panel_state_builder.dart';
 import 'stat_sparkline.dart';
+import 'widget_slots.dart';
 
 /// Builds the widget for one [ChartWidgetData] — a host's own charting
 /// library plotting the server's parsed labels and datasets.
@@ -43,15 +50,20 @@ class DashboardScreen extends StatefulWidget {
   const DashboardScreen({
     required this.provider,
     this.chartBuilder,
+    this.widgetRegistry,
     this.onStatTap,
     this.stateBuilder,
     this.strings = const FilamentStrings(),
     this.maxContentWidth,
+    this.pollInterval,
+    this.eventTransport,
+    this.realtimeChannels = const [],
     super.key,
   });
 
   final DashboardProvider provider;
   final DashboardChartBuilder? chartBuilder;
+  final FilamentWidgetRegistry? widgetRegistry;
 
   /// Called with a stat's [StatData.resourceKey] when its tile is tapped.
   /// Navigation is the host's job, same division as every `onXTap` in this
@@ -67,14 +79,28 @@ class DashboardScreen extends StatefulWidget {
   /// current layout (1200 when not compact, unconstrained when compact).
   final double? maxContentWidth;
 
+  /// Optional schema-driven revalidation cadence. [PanelShell] wires the
+  /// panel's `poll.dashboard` value automatically; a directly composed screen
+  /// may pass it explicitly.
+  final Duration? pollInterval;
+
+  /// Optional host-owned Reverb adapter and the panel resource channels whose
+  /// changes can affect dashboard aggregates. Empty channels keep polling.
+  final FilamentEventTransport? eventTransport;
+  final List<String> realtimeChannels;
+
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
+  PollingSignals? _polling;
+  RealtimeSignals? _realtime;
+
   @override
   void initState() {
     super.initState();
+    _configureRefreshSignals();
     // Only an untouched provider is loaded, same reasoning as
     // PanelIndexScreen: the host owns the provider and may already have it
     // loaded from a previous visit.
@@ -84,7 +110,58 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   @override
+  void didUpdateWidget(covariant DashboardScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.provider != widget.provider ||
+        oldWidget.pollInterval != widget.pollInterval ||
+        oldWidget.eventTransport != widget.eventTransport ||
+        !listEquals(oldWidget.realtimeChannels, widget.realtimeChannels)) {
+      _configureRefreshSignals();
+    }
+  }
+
+  @override
+  void dispose() {
+    _polling?.dispose();
+    unawaited(_realtime?.dispose());
+    super.dispose();
+  }
+
+  void _configureRefreshSignals() {
+    _polling?.dispose();
+    _polling = null;
+    unawaited(_realtime?.dispose());
+    _realtime = null;
+
+    final eventTransport = widget.eventTransport;
+    final interval = widget.pollInterval;
+    if (eventTransport != null && widget.realtimeChannels.isNotEmpty) {
+      _realtime = RealtimeSignals(
+        transport: eventTransport,
+        channels: widget.realtimeChannels,
+        canSignal: () =>
+            mounted &&
+            !widget.provider.status.isLoading &&
+            (ModalRoute.of(context)?.isCurrent ?? true),
+        onSignal: widget.provider.refresh,
+      )..start();
+    }
+
+    if (interval == null) return;
+
+    _polling = PollingSignals(
+      interval: _realtime == null ? interval : interval * 4,
+      canPoll: () =>
+          mounted &&
+          !widget.provider.status.isLoading &&
+          (ModalRoute.of(context)?.isCurrent ?? true),
+      onPoll: widget.provider.refresh,
+    )..start();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    unawaited(_realtime?.flush());
     final builder =
         widget.stateBuilder ?? materialPanelStateBuilder(widget.strings);
 
@@ -122,25 +199,68 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     final widgets = provider.data?.widgets ?? const [];
+    final scope = DashboardWidgetScope(provider: provider);
+    final before =
+        widget.widgetRegistry?.build(
+          FilamentWidgetSlot.dashboardBeforeContent,
+          context,
+          scope,
+        ) ??
+        const <Widget>[];
+    final after =
+        widget.widgetRegistry?.build(
+          FilamentWidgetSlot.dashboardAfterContent,
+          context,
+          scope,
+        ) ??
+        const <Widget>[];
 
     // A successful load of zero widgets is `PanelEmpty`, not the fallthrough
     // this screen exists to prevent — see the class doc.
-    if (widgets.isEmpty) {
+    if (widgets.isEmpty && before.isEmpty && after.isEmpty) {
       return PanelEmpty(message: widget.strings.dashboardEmpty);
     }
 
-    return PanelData(content: _list(context, widgets));
+    return PanelData(
+      content: _list(context, widgets, before: before, after: after),
+    );
   }
 
-  Widget _list(BuildContext context, List<DashboardWidgetData> widgets) {
+  Widget _list(
+    BuildContext context,
+    List<DashboardWidgetData> widgets, {
+    required List<Widget> before,
+    required List<Widget> after,
+  }) {
     final listView = ListView(
       padding: const EdgeInsets.all(8),
       children: [
-        for (final entry in widgets)
-          switch (entry) {
-            StatsWidgetData() => _statsCard(entry),
-            ChartWidgetData() => _chartCard(entry),
+        ...before,
+        for (var index = 0; index < widgets.length; index++) ...[
+          ...?widget.widgetRegistry?.build(
+            FilamentWidgetSlot.dashboardBeforeWidget,
+            context,
+            DashboardWidgetScope(
+              provider: widget.provider,
+              index: index,
+              dashboardWidget: widgets[index],
+            ),
+          ),
+          switch (widgets[index]) {
+            final StatsWidgetData entry => _statsCard(entry),
+            final ChartWidgetData entry => _chartCard(entry),
           },
+          ...?widget.widgetRegistry?.build(
+            FilamentWidgetSlot.dashboardAfterWidget,
+            context,
+            DashboardWidgetScope(
+              provider: widget.provider,
+              index: index,
+              dashboardWidget: widgets[index],
+            ),
+          ),
+        ],
+        ...after,
       ],
     );
 

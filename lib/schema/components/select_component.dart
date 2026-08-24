@@ -32,6 +32,7 @@ final class SelectComponent extends SchemaComponent {
     required this.optionsUrl,
     required this.searchable,
     required this.multiple,
+    required this.placeholder,
     required this.defaultValue,
   }) : super._common(common);
 
@@ -56,6 +57,7 @@ final class SelectComponent extends SchemaComponent {
       multiple:
           common.type == 'multiselect' ||
           (opt<bool>(config, 'multiple') ?? false),
+      placeholder: opt<String>(config, 'placeholder'),
       defaultValue: json['default'],
     );
   }
@@ -67,5 +69,13 @@ final class SelectComponent extends SchemaComponent {
   final String? optionsUrl;
   final bool searchable;
   final bool multiple;
+
+  /// What the BLANK choice means, in the panel's own words — not decoration.
+  /// A `TrashedFilter` publishes `"Without trashed"` here, and its blank
+  /// branch really is `withoutTrashed()` (vendor `TrashedFilter.php:27-31`),
+  /// so a client that renders a generic "Any" over it tells the user the
+  /// filter was removed when it was not. Null when the node declares none,
+  /// which is the ordinary case — then the blank row genuinely is "any".
+  final String? placeholder;
   final Object? defaultValue;
 }

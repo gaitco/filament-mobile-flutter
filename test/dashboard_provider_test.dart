@@ -43,4 +43,28 @@ void main() {
     expect(provider.status, LoadStatus.failure);
     expect(provider.errorMessage, 'Server error');
   });
+
+  test(
+    'a timer refresh keeps the loaded dashboard on transient failure',
+    () async {
+      final transport = FakeTransport({
+        '/api/mobile-panel/dashboard': {
+          'widgets': [
+            {'type': 'stats', 'key': 'orders', 'stats': <Object?>[]},
+          ],
+        },
+      });
+      final provider = DashboardProvider(
+        RestResourceDataSource(transport: transport),
+      );
+
+      await provider.load();
+      transport.errorToThrow = const FilamentTransportException('offline');
+      await provider.refresh();
+
+      expect(provider.status, LoadStatus.success);
+      expect(provider.data?.widgets, hasLength(1));
+      expect(provider.errorMessage, 'offline');
+    },
+  );
 }

@@ -5,6 +5,45 @@ T parse<T extends SchemaComponent>(Map<String, dynamic> json) =>
     SchemaComponent.fromJson(json, 'form[0]') as T;
 
 void main() {
+  group('common component direction', () {
+    test('parses the closed ltr and rtl values', () {
+      expect(
+        parse<TextComponent>(const {
+          'type': 'text',
+          'name': 'arabic',
+          'direction': 'rtl',
+        }).direction,
+        ComponentDirection.rtl,
+      );
+      expect(
+        parse<TextComponent>(const {
+          'type': 'text',
+          'name': 'english',
+          'direction': 'ltr',
+        }).direction,
+        ComponentDirection.ltr,
+      );
+    });
+
+    test('absent or unknown direction inherits instead of guessing', () {
+      expect(
+        parse<TextComponent>(const {
+          'type': 'text',
+          'name': 'absent',
+        }).direction,
+        isNull,
+      );
+      expect(
+        parse<TextComponent>(const {
+          'type': 'text',
+          'name': 'automatic',
+          'direction': 'auto',
+        }).direction,
+        isNull,
+      );
+    });
+  });
+
   group('NumberComponent', () {
     test('parses default, prefix, suffix and numeric bounds', () {
       final component = parse<NumberComponent>(const {
@@ -62,6 +101,31 @@ void main() {
         'name': 'tags',
       });
       expect(component.multiple, isTrue);
+    });
+
+    test('parses config.placeholder, and leaves it null when absent', () {
+      final withPlaceholder = parse<SelectComponent>(const {
+        'type': 'select',
+        'name': 'trashed',
+        'config': {
+          'options': [
+            {'value': '1', 'label': 'With trashed'},
+          ],
+          'placeholder': 'Without trashed',
+        },
+      });
+      final without = parse<SelectComponent>(const {
+        'type': 'select',
+        'name': 'status',
+        'config': {
+          'options': [
+            {'value': 'draft', 'label': 'Draft'},
+          ],
+        },
+      });
+
+      expect(withPlaceholder.placeholder, 'Without trashed');
+      expect(without.placeholder, isNull);
     });
 
     test('config.multiple can force multiple on a plain select', () {

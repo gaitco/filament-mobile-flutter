@@ -19,12 +19,12 @@ import 'load_status.dart';
 /// deliberately not merged here — see [ResourceRecord.permissions].
 class ResourceViewProvider extends ChangeNotifier {
   ResourceViewProvider({
-    required ResourceDataSource source,
+    required this.source,
     required this.resource,
     required this.id,
-  }) : _source = source;
+  });
 
-  final ResourceDataSource _source;
+  final ResourceDataSource source;
   final ResourceSchema resource;
   final Object id;
 
@@ -47,7 +47,18 @@ class ResourceViewProvider extends ChangeNotifier {
   /// the user the data they were already reading. Default false so a first
   /// load, or a move to a different record, never shows the previous one's
   /// values under the new one's title.
-  Future<void> load({bool keepPrevious = false}) async {
+  Future<void> load({bool keepPrevious = false}) =>
+      _load(keepPrevious: keepPrevious, silentFailure: false);
+
+  /// Background revalidation: keeps both the record and a successful screen
+  /// state through a transient failure. Authentication failures still surface.
+  Future<void> refresh() => _load(keepPrevious: true, silentFailure: true);
+
+  Future<void> _load({
+    required bool keepPrevious,
+    required bool silentFailure,
+  }) async {
+    final preserve = keepPrevious && _record != null;
     _status = LoadStatus.loading;
     _errorMessage = null;
     _isUnauthenticated = false;
@@ -55,14 +66,16 @@ class ResourceViewProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _record = await _source.record(resource.key, id);
+      _record = await source.record(resource.key, id);
       _status = LoadStatus.success;
     } catch (e) {
       if (e is FilamentTransportException && e.statusCode == 401) {
         _isUnauthenticated = true;
       }
       _errorMessage = messageOf(e);
-      _status = LoadStatus.failure;
+      _status = preserve && silentFailure && !_isUnauthenticated
+          ? LoadStatus.success
+          : LoadStatus.failure;
     }
 
     notifyListeners();
@@ -72,7 +85,7 @@ class ResourceViewProvider extends ChangeNotifier {
   /// decides whether the screen pops or stays, and either way this provider's
   /// own `_record`/`_status` describe a record that either no longer exists or
   /// was never touched — nothing here needs updating either way.
-  Future<WriteResult> delete() => _source.destroy(resource.key, id);
+  Future<WriteResult> delete() => source.destroy(resource.key, id);
 
   /// Run [action] against this record and, on success, re-fetch — an
   /// action's most common effect is changing exactly the `permissions` and
@@ -83,7 +96,7 @@ class ResourceViewProvider extends ChangeNotifier {
   /// decides whether the message is a snack bar or a banner, and a failed
   /// action is not a failed screen — the record is still fine to display.
   Future<ActionResult> runAction(RecordAction action) async {
-    final result = await _source.runAction(resource.key, id, action.name);
+    final result = await source.runAction(resource.key, id, action.name);
 
     if (result is ActionSuccess) {
       await load();
@@ -100,5 +113,5 @@ class ResourceViewProvider extends ChangeNotifier {
   Future<PaginatedRecords> loadRelation(
     RelationDescriptor relation, {
     int page = 1,
-  }) => _source.relation(resource.key, id, relation, page: page);
+  }) => source.relation(resource.key, id, relation, page: page);
 }

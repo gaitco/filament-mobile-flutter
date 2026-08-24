@@ -4,14 +4,20 @@ import 'package:flutter/material.dart';
 
 import '../data/resource_record.dart';
 import '../ports/filament_strings.dart';
+import '../ports/filament_event_transport.dart';
 import '../ports/panel_view_state.dart';
 import '../schema/resource_schema.dart';
+import '../schema/schema_component.dart';
 import '../state/resource_list_provider.dart';
+import '../state/polling_signals.dart';
+import '../state/realtime_signals.dart';
+import 'filter_sheet.dart';
 import 'layout.dart';
 import 'material_panel_state_builder.dart';
 import 'paginated_card_list.dart';
 import 'resource_card.dart';
 import 'resource_row.dart';
+import 'widget_slots.dart';
 
 /// A resource's records as a scrollable list of cards.
 ///
@@ -34,6 +40,8 @@ class ResourceListScreen extends StatefulWidget {
     this.onCreateTap,
     this.rowStyle,
     this.selectedRecordId,
+    this.widgetRegistry,
+    this.eventTransport,
     super.key,
   });
 
@@ -57,6 +65,13 @@ class ResourceListScreen extends StatefulWidget {
   /// Highlights one row in `row` style — see [PaginatedCardList.selectedRecordId].
   final Object? selectedRecordId;
 
+  /// Application-owned widgets inserted into this screen's named slots.
+  final FilamentWidgetRegistry? widgetRegistry;
+
+  /// Optional host-owned Reverb adapter. A published resource channel and
+  /// this adapter replace polling; either one absent keeps the poll fallback.
+  final FilamentEventTransport? eventTransport;
+
   @override
   State<ResourceListScreen> createState() => _ResourceListScreenState();
 }
@@ -66,6 +81,8 @@ class _ResourceListScreenState extends State<ResourceListScreen> {
 
   final _scroll = ScrollController();
   Timer? _searchTimer;
+  PollingSignals? _polling;
+  RealtimeSignals? _realtime;
 
   @override
   void initState() {
@@ -76,6 +93,7 @@ class _ResourceListScreenState extends State<ResourceListScreen> {
     // skeleton, whose list never attaches [_scroll]. Each page landing is
     // what must re-check whether the viewport is still short.
     widget.provider.addListener(_scheduleFillCheck);
+    _configureRefreshSignals();
     // Only an untouched provider is loaded. The host owns the provider, so a
     // host that keeps one per resource would otherwise have its list blanked
     // and refetched every time the user came back from a record.
@@ -85,13 +103,68 @@ class _ResourceListScreenState extends State<ResourceListScreen> {
   }
 
   @override
+  void didUpdateWidget(covariant ResourceListScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.provider != widget.provider ||
+        oldWidget.provider.resource.poll?.lists !=
+            widget.provider.resource.poll?.lists ||
+        oldWidget.provider.resource.channel !=
+            widget.provider.resource.channel ||
+        oldWidget.eventTransport != widget.eventTransport) {
+      oldWidget.provider.removeListener(_scheduleFillCheck);
+      widget.provider.addListener(_scheduleFillCheck);
+      _configureRefreshSignals();
+    }
+  }
+
+  @override
   void dispose() {
     _searchTimer?.cancel();
+    _polling?.dispose();
+    unawaited(_realtime?.dispose());
     widget.provider.removeListener(_scheduleFillCheck);
     _scroll
       ..removeListener(_onScroll)
       ..dispose();
     super.dispose();
+  }
+
+  void _configureRefreshSignals() {
+    _polling?.dispose();
+    _polling = null;
+    unawaited(_realtime?.dispose());
+    _realtime = null;
+
+    final eventTransport = widget.eventTransport;
+    final channel = widget.provider.resource.channel;
+    final interval = widget.provider.resource.poll?.lists;
+    if (eventTransport != null && channel != null) {
+      _realtime = RealtimeSignals(
+        transport: eventTransport,
+        channels: [channel],
+        canSignal: () =>
+            mounted &&
+            !widget.provider.status.isLoading &&
+            !widget.provider.isReordering &&
+            (ModalRoute.of(context)?.isCurrent ?? true),
+        onSignal: () => widget.provider.refresh(keepPrevious: true),
+      )..start();
+    }
+
+    if (interval == null) return;
+
+    _polling = PollingSignals(
+      // A quiet socket failure must not make the screen stale forever. Push
+      // replaces the ordinary cadence, while this 4x watchdog remains a
+      // bounded recovery path when polling is also configured by the host.
+      interval: _realtime == null ? interval : interval * 4,
+      canPoll: () =>
+          mounted &&
+          !widget.provider.status.isLoading &&
+          !widget.provider.isReordering &&
+          (ModalRoute.of(context)?.isCurrent ?? true),
+      onPoll: () => widget.provider.refresh(keepPrevious: true),
+    )..start();
   }
 
   void _scheduleFillCheck() {
@@ -140,6 +213,7 @@ class _ResourceListScreenState extends State<ResourceListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    unawaited(_realtime?.flush());
     final builder =
         widget.stateBuilder ?? materialPanelStateBuilder(widget.strings);
 
@@ -160,6 +234,16 @@ class _ResourceListScreenState extends State<ResourceListScreen> {
                     icon: const Icon(Icons.sort),
                     onPressed: _openSortSheet,
                     tooltip: widget.strings.sortTitle,
+                  ),
+                if (!reordering && provider.resource.filters.isNotEmpty)
+                  IconButton(
+                    icon: Badge(
+                      label: Text('${provider.activeFilterCount}'),
+                      isLabelVisible: provider.activeFilterCount > 0,
+                      child: const Icon(Icons.filter_list),
+                    ),
+                    onPressed: _openFilterSheet,
+                    tooltip: widget.strings.filters,
                   ),
                 if (reordering)
                   IconButton(
@@ -204,7 +288,12 @@ class _ResourceListScreenState extends State<ResourceListScreen> {
             // fights both pull-to-refresh and its own drag gestures.
             body: reordering
                 ? _reorderList(context)
-                : builder(context, _state(context)),
+                : Column(
+                    children: [
+                      if (_filterChipsRow(provider) case final chips?) chips,
+                      Expanded(child: builder(context, _state(context))),
+                    ],
+                  ),
             floatingActionButton: reordering ? null : _createButton(),
           );
         },
@@ -378,14 +467,36 @@ class _ResourceListScreenState extends State<ResourceListScreen> {
       return PanelFailure(message: message, retry: provider.load);
     }
 
-    if (provider.records.isEmpty) {
+    final scope = ResourceListWidgetScope(provider: provider);
+    final before =
+        widget.widgetRegistry?.build(
+          FilamentWidgetSlot.resourceListBeforeContent,
+          context,
+          scope,
+        ) ??
+        const <Widget>[];
+    final after =
+        widget.widgetRegistry?.build(
+          FilamentWidgetSlot.resourceListAfterContent,
+          context,
+          scope,
+        ) ??
+        const <Widget>[];
+
+    if (provider.records.isEmpty && before.isEmpty && after.isEmpty) {
       return PanelEmpty(message: widget.strings.empty);
     }
 
-    return PanelData(content: _list(context));
+    return PanelData(
+      content: _list(context, before: before, after: after),
+    );
   }
 
-  Widget _list(BuildContext context) {
+  Widget _list(
+    BuildContext context, {
+    required List<Widget> before,
+    required List<Widget> after,
+  }) {
     final provider = widget.provider;
     final style = _resolvedRowStyle(context);
 
@@ -399,6 +510,8 @@ class _ResourceListScreenState extends State<ResourceListScreen> {
       onRefresh: provider.refresh,
       onLoadMoreRetry: provider.loadMore,
       controller: _scroll,
+      beforeRecords: before,
+      afterRecords: after,
       rowStyle: style,
       header: style == ListRowStyle.row
           ? ResourceRowHeader(layout: provider.resource.card)
@@ -446,5 +559,101 @@ class _ResourceListScreenState extends State<ResourceListScreen> {
     );
 
     if (chosen != null) await provider.sortBy(chosen);
+  }
+
+  /// Opens [FilterSheet] as a `showModalBottomSheet` on compact, a
+  /// `showDialog` (420-wide) on medium/expanded — same overlay-route trap as
+  /// [_openSortSheet]: resolved from the schema value, not
+  /// `Directionality.of(context)`, and the sheet/dialog wraps its own
+  /// content in that direction because it does not inherit the screen's.
+  Future<void> _openFilterSheet() async {
+    final provider = widget.provider;
+    final direction = textDirectionOf(provider.resource.direction);
+
+    if (FilamentLayout.isCompact(context)) {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        builder: (sheetContext) => Directionality(
+          textDirection: direction,
+          child: FilterSheet(provider: provider, strings: widget.strings),
+        ),
+      );
+      return;
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => Directionality(
+        textDirection: direction,
+        child: Dialog(
+          child: SizedBox(
+            width: 420,
+            child: FilterSheet(provider: provider, strings: widget.strings),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Filament's own indicator chips (P24): one removable [InputChip] per
+  /// filter [ResourceListProvider.filters] currently holds a non-cleared
+  /// value for, labelled with the matching option's own label rather than
+  /// the raw wire value. Null when nothing is active, so the body's
+  /// [Column] collapses back to just the list.
+  Widget? _filterChipsRow(ResourceListProvider provider) {
+    final chips = <Widget>[];
+
+    for (final node in provider.resource.filters) {
+      if (node is! SelectComponent) continue;
+      final name = node.name;
+      if (name == null) continue;
+
+      final value = provider.filters[name];
+      if (value == null || value == '') continue;
+
+      chips.add(
+        InputChip(
+          label: Text(_filterChipLabel(node, value)),
+          deleteIcon: const Icon(Icons.close, size: 18),
+          onDeleted: () => provider.setFilter(name, null),
+        ),
+      );
+    }
+
+    if (chips.isEmpty) return null;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: Wrap(spacing: 8, runSpacing: 4, children: chips),
+    );
+  }
+
+  /// `"{filter}: {option}"`, the way Filament's own indicator reads — the
+  /// option label alone ("Draft") names nothing once two filters are active.
+  /// Falls back to the option label alone for a node with no label, which
+  /// the contract permits.
+  String _filterChipLabel(SelectComponent node, Object value) {
+    final option = _filterOptionLabel(node, value);
+    final label = node.label;
+
+    return label == null ? option : '$label: $option';
+  }
+
+  /// [node]'s own option label(s) for [value] — never the raw wire value,
+  /// per this screen's class doc on the chips row. `value` is a `List` for
+  /// a multiselect filter (every matching option's label, comma-joined) and
+  /// a scalar for everything else.
+  String _filterOptionLabel(SelectComponent node, Object value) {
+    if (value is List) {
+      return [
+        for (final option in node.options)
+          if (value.contains(option.value)) option.label,
+      ].join(', ');
+    }
+    for (final option in node.options) {
+      if (option.value == value) return option.label;
+    }
+    return value.toString();
   }
 }

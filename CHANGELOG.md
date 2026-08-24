@@ -1,6 +1,77 @@
 # Changelog
 
-## Unreleased
+## 0.10.0 — 2026-08-24
+
+- **Per-field and per-entry direction overrides.** An optional node-level
+  `direction` parses as `ComponentDirection`; absent or unknown values inherit
+  the panel. `FieldRegistry` and `EntryRegistry` establish `Directionality`
+  before invoking either built-in or host-custom builders, so controls,
+  overlays, repeater children, and extensions share one answer.
+
+- **P20 phase 2: host-owned realtime transport.** `PanelSchema.realtime` and
+  `ResourceSchema.channel` parse the additive Reverb contract, while the new
+  optional `FilamentEventTransport` lets a host plug in any Pusher-protocol
+  client without adding a socket dependency to core. `PanelShell`, list,
+  detail, and dashboard screens coalesce event bursts into authorized HTTP
+  refreshes, revalidate on lifecycle resume, and keep a 4× polling watchdog
+  wherever `panel.poll` is also configured.
+
+- **P20 phase 1: lifecycle-aware background refresh.** An optional
+  `panel.poll` contract enables jittered, non-overlapping revalidation on
+  visible resource lists, records, and dashboards. Timers pause when the app
+  is backgrounded or the route is covered; list polling also pauses during
+  drag-to-reorder, and resume triggers one prompt refresh. Transient
+  background failures keep the last good content while 401 still surfaces.
+  `RestResourceDataSource` reuses `FilamentConditionalTransport` and an
+  in-memory response cache so unchanged reads can complete as empty 304s.
+  With no published poll config—or a transport that only implements ordinary
+  GET—behavior remains unchanged.
+
+- **P19: map-point contract support and built-in phone fields.**
+  `MapPointComponent`/`MapPointValue` parse form and infolist point nodes,
+  tolerating numeric strings on read, while `PhoneComponent` renders through
+  a phone-keyboard text field and preserves the server's value byte-for-byte.
+  Phone 422s stay field-local. Map fields deliberately show a visible
+  extension-required fallback in core; the new optional
+  `filament_mobile_maps` companion supplies `flutter_map` form and infolist
+  builders without adding a map dependency to this package.
+
+- **Host-owned Flutter widget slots.** `FilamentWidgetRegistry` inserts one or
+  more custom builders into stable named placements across the panel index,
+  dashboard (including before/after each server widget), resource list,
+  record view, resource form, and relation list. Builders receive a typed
+  screen scope with the live provider and may return null conditionally;
+  fixed widgets use `registerWidget`. `PanelShell.widgetRegistry` forwards one
+  registry through all routes, including relation-owned forms, while every
+  individual screen also accepts it directly. Widgets render inside the
+  native scroll content, can replace a successfully loaded empty state, and
+  inherit the screen's adaptive layout and text direction. `PanelShell` also
+  now resolves the published child resource for a full relation list, opens
+  its rows, and forwards the host's `FieldRegistry` to relation-owned forms;
+  previously those three integrations were omitted from the all-in-one shell.
+
+- **Remote table-filter options.** Filters with `optionsUrl` now search through
+  the optional `FilterOptionsDataSource` capability (implemented by
+  `RestResourceDataSource`). The picker has loading, empty, failure/retry and
+  truncated-result states, preserves the single-value "Any" choice, and
+  supports remote multiselect with an explicit Save action.
+
+- **P24: table filters.** `ResourceSchema.filters` (the server's published
+  `select`-shaped filter nodes) drives a new `FilterSheet`, opened from a
+  filter `IconButton` beside the sort action on `ResourceListScreen` —
+  hidden when a resource publishes none, badged with
+  `ResourceListProvider.activeFilterCount` when it isn't zero. The sheet
+  renders one field per filter against `provider.filters`/`setFilter()`,
+  with a synthetic "Any" option prepended for a single-value filter (never
+  a `->multiple()` one, whose own empty selection already means that) and a
+  "Clear all" button. Active filters also show as one deletable `InputChip`
+  each above the list. `ResourceListProvider` seeds every filter's
+  server-declared `->default()` on construction — belt-and-braces with the
+  server applying its own default, not a replacement for it — and
+  canonicalises every "cleared" shape (`null`, `''`, an emptied `List`) to
+  the same wire value so a chip, the badge, and the request the provider
+  sends never disagree. New strings: `filters`, `clearFilters`,
+  `anyOption`.
 
 - **P23: adaptive layout for wide screens.** `FilamentBreakpoints`
   (compact < 600dp, medium 600–839dp, expanded ≥ 840dp — Material 3's window

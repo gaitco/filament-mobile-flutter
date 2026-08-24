@@ -5,6 +5,7 @@ import '../ports/panel_view_state.dart';
 import '../schema/resource_schema.dart';
 import '../state/panel_provider.dart';
 import 'material_panel_state_builder.dart';
+import 'widget_slots.dart';
 
 /// The panel's resources as a single list: the entry point once a user is
 /// signed in.
@@ -20,6 +21,7 @@ class PanelIndexScreen extends StatefulWidget {
     required this.provider,
     required this.onResourceTap,
     this.leading,
+    this.widgetRegistry,
     this.stateBuilder,
     this.strings = const FilamentStrings(),
     super.key,
@@ -34,6 +36,9 @@ class PanelIndexScreen extends StatefulWidget {
   /// Null (or a null return for one resource) renders that row without a
   /// leading slot, exactly as before this parameter existed.
   final Widget? Function(ResourceSchema resource)? leading;
+
+  /// Application-owned widgets inserted into this screen's named slots.
+  final FilamentWidgetRegistry? widgetRegistry;
 
   final PanelBodyBuilder? stateBuilder;
   final FilamentStrings strings;
@@ -65,13 +70,13 @@ class _PanelIndexScreenState extends State<PanelIndexScreen> {
         widget.provider.panel?.direction ?? PanelDirection.ltr,
         Scaffold(
           appBar: AppBar(title: Text(widget.provider.panel?.title ?? '')),
-          body: builder(context, _state()),
+          body: builder(context, _state(context)),
         ),
       ),
     );
   }
 
-  PanelViewState _state() {
+  PanelViewState _state(BuildContext context) {
     final provider = widget.provider;
 
     if (provider.status.isLoading || provider.status.isInitial) {
@@ -89,23 +94,44 @@ class _PanelIndexScreenState extends State<PanelIndexScreen> {
     }
 
     final resources = provider.panel?.resources ?? const [];
+    final scope = PanelIndexWidgetScope(provider: provider);
+    final before =
+        widget.widgetRegistry?.build(
+          FilamentWidgetSlot.panelIndexBeforeContent,
+          context,
+          scope,
+        ) ??
+        const <Widget>[];
+    final after =
+        widget.widgetRegistry?.build(
+          FilamentWidgetSlot.panelIndexAfterContent,
+          context,
+          scope,
+        ) ??
+        const <Widget>[];
 
     // A successful load of zero resources is `PanelEmpty`, not `PanelLoading`
     // and not the fallthrough this screen exists to prevent — see the class
     // doc. `materialPanelStateBuilder` (and any host override) is responsible
     // for its `panel.empty` key, exactly like the sibling screens.
-    if (resources.isEmpty) {
+    if (resources.isEmpty && before.isEmpty && after.isEmpty) {
       return PanelEmpty(message: widget.strings.empty);
     }
 
-    return PanelData(content: _list(resources));
+    return PanelData(
+      content: _list(resources, before: before, after: after),
+    );
   }
 
   /// Ungrouped resources first — this always matches Filament's own panel
   /// navigation — then each group under its heading, in the order `/schema`
   /// first lists it: this matches Filament only when the panel registers its
   /// group order explicitly via `->navigationGroups()`.
-  Widget _list(List<ResourceSchema> resources) {
+  Widget _list(
+    List<ResourceSchema> resources, {
+    required List<Widget> before,
+    required List<Widget> after,
+  }) {
     final ungrouped = <ResourceSchema>[];
     final grouped = <String, List<ResourceSchema>>{};
 
@@ -119,10 +145,10 @@ class _PanelIndexScreenState extends State<PanelIndexScreen> {
     }
 
     final theme = Theme.of(context);
-
     return ListView(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
       children: [
+        ...before,
         if (ungrouped.isNotEmpty) _card(ungrouped),
         for (final entry in grouped.entries) ...[
           Padding(
@@ -145,6 +171,7 @@ class _PanelIndexScreenState extends State<PanelIndexScreen> {
           ),
           _card(entry.value),
         ],
+        ...after,
       ],
     );
   }

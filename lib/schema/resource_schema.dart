@@ -23,6 +23,99 @@ enum PanelDirection {
       value == 'rtl' ? PanelDirection.rtl : PanelDirection.ltr;
 }
 
+/// Optional background-revalidation cadence published by the panel.
+///
+/// A malformed declaration reads as absent: polling is an additive freshness
+/// capability, never a reason to reject an otherwise usable panel document.
+class PollConfig extends Equatable {
+  const PollConfig({
+    required this.lists,
+    required this.detail,
+    required this.dashboard,
+  });
+
+  static PollConfig? fromJson(Object? value) {
+    if (value is! Map<String, dynamic>) return null;
+
+    final lists = _pollSeconds(value['lists']);
+    final detail = _pollSeconds(value['detail']);
+    final dashboard = _pollSeconds(value['dashboard']);
+    if (lists == null || detail == null || dashboard == null) return null;
+
+    return PollConfig(lists: lists, detail: detail, dashboard: dashboard);
+  }
+
+  final Duration lists;
+  final Duration detail;
+  final Duration dashboard;
+
+  @override
+  List<Object?> get props => [lists, detail, dashboard];
+}
+
+/// Public Reverb connection settings published by the panel.
+///
+/// Parsing is deliberately lenient: malformed realtime configuration disables
+/// push and leaves polling available rather than rejecting the panel schema.
+class RealtimeConfig extends Equatable {
+  const RealtimeConfig({
+    required this.key,
+    required this.host,
+    required this.port,
+    required this.scheme,
+    required this.authEndpoint,
+  });
+
+  static RealtimeConfig? fromJson(Object? value) {
+    if (value is! Map<String, dynamic> || value['driver'] != 'reverb') {
+      return null;
+    }
+
+    final key = value['key'];
+    final host = value['host'];
+    final port = value['port'];
+    final scheme = value['scheme'];
+    final authEndpoint = value['authEndpoint'];
+
+    if (key is! String ||
+        key.trim().isEmpty ||
+        host is! String ||
+        host.trim().isEmpty ||
+        port is! int ||
+        port < 1 ||
+        port > 65535 ||
+        scheme is! String ||
+        !const {'ws', 'wss'}.contains(scheme) ||
+        authEndpoint is! String ||
+        !authEndpoint.startsWith('/') ||
+        authEndpoint.startsWith('//')) {
+      return null;
+    }
+
+    return RealtimeConfig(
+      key: key.trim(),
+      host: host.trim(),
+      port: port,
+      scheme: scheme,
+      authEndpoint: authEndpoint,
+    );
+  }
+
+  final String key;
+  final String host;
+  final int port;
+  final String scheme;
+  final String authEndpoint;
+
+  @override
+  List<Object?> get props => [key, host, port, scheme, authEndpoint];
+}
+
+Duration? _pollSeconds(Object? value) =>
+    value is int && value >= 1 && value <= 3600
+    ? Duration(seconds: value)
+    : null;
+
 class ResourceSearch extends Equatable {
   const ResourceSearch({this.enabled = false, this.placeholder});
 
@@ -137,6 +230,8 @@ class ResourceSchema extends Equatable {
     this.badge,
     this.direction = PanelDirection.ltr,
     this.locales = const [],
+    this.poll,
+    this.channel,
     this.reorder,
   });
 
@@ -153,6 +248,7 @@ class ResourceSchema extends Equatable {
     String path, {
     PanelDirection direction = PanelDirection.ltr,
     List<String> locales = const [],
+    PollConfig? poll,
   }) {
     final sortNodes = objects(json, 'sorts', path);
     final rawGroup = opt<String>(json, 'group');
@@ -198,6 +294,11 @@ class ResourceSchema extends Equatable {
       },
       direction: direction,
       locales: locales,
+      poll: poll,
+      channel: switch (json['channel']) {
+        final String value when value.trim().isNotEmpty => value.trim(),
+        _ => null,
+      },
       reorder: ReorderConfig.fromJson(json['reorder']),
     );
   }
@@ -258,6 +359,14 @@ class ResourceSchema extends Equatable {
   /// order a translatable group's chips; the chips themselves come from
   /// this resource's own `translatable` form fields.
   final List<String> locales;
+
+  /// The owning panel's opt-in revalidation intervals. Propagated at parse
+  /// time like [direction] and [locales]; null means no background polling.
+  final PollConfig? poll;
+
+  /// Private resource change-feed channel. Its presence means the resource
+  /// opted into realtime for this authorized schema; null keeps polling.
+  final String? channel;
 
   /// Drag-to-reorder capability (P18) — absent (`null`) on almost every
   /// resource, present only when the server's `/schema` response carried the

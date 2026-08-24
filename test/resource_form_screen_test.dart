@@ -3,6 +3,7 @@ import 'package:filament_mobile/ports/filament_strings.dart';
 import 'package:filament_mobile/ports/filament_transport.dart';
 import 'package:filament_mobile/schema/schema_component.dart';
 import 'package:filament_mobile/ui/resource_form_screen.dart';
+import 'package:filament_mobile/ui/widget_slots.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -17,6 +18,7 @@ Widget formHarness({
   WriteResult writeResult = const WriteSuccess({}),
   Object? recordId,
   TextDirection textDirection = TextDirection.ltr,
+  FilamentWidgetRegistry? widgetRegistry,
 }) {
   final effectiveSource =
       source ??
@@ -31,12 +33,66 @@ Widget formHarness({
       textDirection: textDirection,
       child: ResourceFormScreen(
         provider: providerFor(effectiveSource, recordId: recordId),
+        widgetRegistry: widgetRegistry,
       ),
     ),
   );
 }
 
 void main() {
+  testWidgets('custom form slots surround fields and actions', (tester) async {
+    final registry = FilamentWidgetRegistry();
+    ResourceFormWidgetScope? receivedScope;
+    Widget keyed(String key) => SizedBox(key: ValueKey(key), height: 8);
+
+    registry
+      ..register(FilamentWidgetSlot.resourceFormBeforeFields, (context, scope) {
+        receivedScope = scope as ResourceFormWidgetScope;
+        return keyed('slot.before-fields');
+      })
+      ..register(
+        FilamentWidgetSlot.resourceFormAfterFields,
+        (context, scope) => keyed('slot.after-fields'),
+      )
+      ..register(
+        FilamentWidgetSlot.resourceFormBeforeActions,
+        (context, scope) => keyed('slot.before-actions'),
+      )
+      ..register(
+        FilamentWidgetSlot.resourceFormAfterActions,
+        (context, scope) => keyed('slot.after-actions'),
+      );
+
+    await tester.pumpWidget(
+      formHarness(components: formWith(), widgetRegistry: registry),
+    );
+    await pumpUntilFound(tester, find.byType(TextField));
+
+    expect(receivedScope?.resource.key, isNotEmpty);
+    final beforeFields = tester
+        .getTopLeft(find.byKey(const ValueKey('slot.before-fields')))
+        .dy;
+    final firstField = tester.getTopLeft(find.byType(TextField).first).dy;
+    final afterFields = tester
+        .getTopLeft(find.byKey(const ValueKey('slot.after-fields')))
+        .dy;
+    final beforeActions = tester
+        .getTopLeft(find.byKey(const ValueKey('slot.before-actions')))
+        .dy;
+    final submit = tester
+        .getTopLeft(find.byKey(const ValueKey('form.submit')))
+        .dy;
+    final afterActions = tester
+        .getTopLeft(find.byKey(const ValueKey('slot.after-actions')))
+        .dy;
+
+    expect(beforeFields, lessThan(firstField));
+    expect(firstField, lessThan(afterFields));
+    expect(afterFields, lessThan(beforeActions));
+    expect(beforeActions, lessThan(submit));
+    expect(submit, lessThan(afterActions));
+  });
+
   testWidgets('renders the form, not a spinner, once loaded', (tester) async {
     // A fixed pump count is not a wait: this polls until the provider
     // reports success and fails on timeout rather than silently asserting

@@ -1,10 +1,12 @@
 import 'package:filament_mobile/data/action_result.dart';
+import 'package:filament_mobile/data/options_page.dart';
 import 'package:filament_mobile/data/rest_resource_data_source.dart';
 import 'package:filament_mobile/ports/filament_conditional_transport.dart';
 import 'package:filament_mobile/ports/filament_schema_cache.dart';
 import 'package:filament_mobile/ports/filament_transport.dart';
 import 'package:filament_mobile/schema/card_layout.dart';
 import 'package:filament_mobile/schema/relation_descriptor.dart';
+import 'package:filament_mobile/schema/schema_component.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/fake_transport.dart';
@@ -402,6 +404,93 @@ void main() {
     },
   );
 
+  test('list() sends a single-value filter as filter[name]=value', () async {
+    final transport = FakeTransport({
+      '/api/mobile-panel/schema': _panelJson,
+      '/api/mobile-panel/banners': {'data': [], 'meta': {}},
+    });
+
+    await sourceFor(transport).list('banners', filters: {'status': 'draft'});
+
+    expect(transport.calls.last.query, {
+      'page': '1',
+      'filter[status]': 'draft',
+    });
+  });
+
+  test(
+    'list() sends a multiple filter as indexed keys, never filter[name][]',
+    () async {
+      // Load-bearing: FilamentTransport.get() hands the host a FLAT map and
+      // the reference host stringifies every value, so a raw List<String>
+      // here would go out as the literal "[a, b]". See the doc on
+      // ResourceDataSource.list() for the full reasoning.
+      final transport = FakeTransport({
+        '/api/mobile-panel/schema': _panelJson,
+        '/api/mobile-panel/banners': {'data': [], 'meta': {}},
+      });
+
+      await sourceFor(transport).list(
+        'banners',
+        filters: {
+          'tags': ['a', 'b'],
+        },
+      );
+
+      expect(transport.calls.last.query, {
+        'page': '1',
+        'filter[tags][0]': 'a',
+        'filter[tags][1]': 'b',
+      });
+    },
+  );
+
+  test('list() sends no filter key at all when filters is empty', () async {
+    final transport = FakeTransport({
+      '/api/mobile-panel/schema': _panelJson,
+      '/api/mobile-panel/banners': {'data': [], 'meta': {}},
+    });
+
+    await sourceFor(transport).list('banners');
+
+    expect(
+      transport.calls.last.query!.keys.any((k) => k.startsWith('filter')),
+      isFalse,
+    );
+  });
+
+  // Review fix round 1: an explicitly-cleared filter must reach the wire as
+  // the bare `filter[name]=` the server reads as "any" — mobile-core's
+  // ListQuery::filters() treats an OMITTED key as "apply this filter's
+  // default", so "send nothing" (the empty-map case above) is NOT the same
+  // request as "send an explicit clear".
+  test(
+    'list() sends filter[status]= for an explicitly cleared single filter',
+    () async {
+      final transport = FakeTransport({
+        '/api/mobile-panel/schema': _panelJson,
+        '/api/mobile-panel/banners': {'data': [], 'meta': {}},
+      });
+
+      await sourceFor(transport).list('banners', filters: {'status': ''});
+
+      expect(transport.calls.last.query, {'page': '1', 'filter[status]': ''});
+    },
+  );
+
+  test('list() sends filter[tags]= for an explicitly cleared multiple filter — '
+      'an empty List, not zero indexed keys, since a query string cannot '
+      'express an empty list', () async {
+    final transport = FakeTransport({
+      '/api/mobile-panel/schema': _panelJson,
+      '/api/mobile-panel/banners': {'data': [], 'meta': {}},
+    });
+
+    await sourceFor(transport).list('banners', filters: {'tags': <String>[]});
+
+    expect(transport.calls.last.query, {'page': '1', 'filter[tags]': ''});
+  });
+
   test('sends no sort or direction when they are whitespace', () async {
     final transport = FakeTransport({
       '/api/mobile-panel/schema': _panelJson,
@@ -507,4 +596,75 @@ void main() {
       expect((await cache.read('user:1'))?.etag, '"abc"');
     },
   );
+
+  test('pollable reads reuse their body on a conditional 304', () async {
+    final listBody = <String, dynamic>{
+      'data': [
+        {'id': 7, 'name': 'Cached'},
+      ],
+      'meta': {'current_page': 1, 'last_page': 1},
+    };
+    final transport = FakeConditionalTransport(
+      const {},
+      conditionalResponses: {
+        '/api/mobile-panel/schema': [
+          ConditionalResponse(
+            notModified: false,
+            body: _panelJson,
+            etag: '"schema"',
+          ),
+        ],
+        '/api/mobile-panel/banners?page=1': [
+          ConditionalResponse(
+            notModified: false,
+            body: listBody,
+            etag: '"list"',
+          ),
+          const ConditionalResponse(notModified: true),
+        ],
+      },
+    );
+    final source = sourceFor(transport);
+
+    final first = await source.list('banners');
+    final second = await source.list('banners');
+
+    expect(first.records.single.id, 7);
+    expect(second.records.single.get<String>('name'), 'Cached');
+    expect(transport.conditionalCalls.last.etag, '"list"');
+  });
+
+  test('filterOptions posts the filter query and parses its page', () async {
+    final transport = FakeTransport(
+      const {},
+      writes: {
+        'POST /api/mobile-panel/banners/filter-options': const FilamentResponse(
+          statusCode: 200,
+          body: {
+            'options': [
+              {'value': 'active', 'label': 'Active'},
+            ],
+            'hasMore': true,
+          },
+        ),
+      },
+    );
+
+    final page = await sourceFor(
+      transport,
+    ).filterOptions('banners', filter: 'status', query: 'act');
+
+    expect(
+      page,
+      const OptionsPage(
+        options: [SelectOption(value: 'active', label: 'Active')],
+        hasMore: true,
+      ),
+    );
+    expect(
+      transport.calls.single.path,
+      '/api/mobile-panel/banners/filter-options',
+    );
+    expect(transport.calls.single.body, {'filter': 'status', 'q': 'act'});
+  });
 }

@@ -23,7 +23,8 @@ class _GatedSource implements ResourceDataSource {
   Future<void> reorder(String resourceKey, List<Object> ids) =>
       throw UnimplementedError();
   final List<Completer<PaginatedRecords>> pending = [];
-  final List<({int page, String? search})> calls = [];
+  final List<({int page, String? search, Map<String, Object?> filters})> calls =
+      [];
 
   @override
   Future<PaginatedRecords> relation(
@@ -69,8 +70,9 @@ class _GatedSource implements ResourceDataSource {
     String? sort,
     String? direction,
     bool reorder = false,
+    Map<String, Object?> filters = const {},
   }) {
-    calls.add((page: page, search: search));
+    calls.add((page: page, search: search, filters: filters));
     final completer = Completer<PaginatedRecords>();
     pending.add(completer);
     return completer.future;
@@ -214,5 +216,32 @@ void main() {
     expect(provider.hasMore, isFalse);
     expect(provider.isLoadingMore, isFalse);
     expect(source.calls.last.search, 'جديد');
+  });
+
+  // P24: setFilter() refetches page one exactly like search() does, so it
+  // is exposed to the same race — mirrors 'a stale search response never
+  // overwrites a newer one' above.
+  test('a stale setFilter() response never overwrites a newer one', () async {
+    final source = _GatedSource();
+    final provider = ResourceListProvider(source: source, resource: _resource);
+
+    final stale = provider.setFilter('status', 'draft');
+    final fresh = provider.setFilter('status', 'published');
+
+    source.land(1, [2], lastPage: 1); // the newer filter lands first
+    source.land(0, [1], lastPage: 5); // then the older one
+    await Future.wait([stale, fresh]);
+
+    expect(provider.filters, {'status': 'published'});
+    expect(provider.records.map((r) => r.id), [2]);
+    expect(
+      provider.hasMore,
+      isFalse,
+      reason:
+          'hasMore came from the stale '
+          'page — the user would scroll into the wrong filter',
+    );
+    expect(provider.status, LoadStatus.success);
+    expect(source.calls.last.filters, {'status': 'published'});
   });
 }

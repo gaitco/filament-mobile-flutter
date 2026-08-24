@@ -33,6 +33,19 @@ abstract interface class ResourceDataSource {
   /// entirely, mirroring the server's own contract (P18): reorder mode
   /// discards the sort column outright, the same way Filament's own
   /// reorder-mode table does. [search] still applies in this mode.
+  ///
+  /// [filters] (P24): name => `String` (single value) or `List<String>`
+  /// (multiple). Encoded on the wire as INDEXED keys —
+  /// `filter[tags][0]=a&filter[tags][1]=b` — never repeated ones
+  /// (`filter[tags][]=a&...`). [FilamentTransport.get] hands the host a FLAT
+  /// map, and the reference host stringifies every value
+  /// (`example/lib/http_filament_transport.dart`), so a `List<String>` value
+  /// would go out as the literal `"[a, b]"`. Distinct indexed keys stay
+  /// scalar strings — no change needed to the port or to any host — and PHP
+  /// parses `filter[tags][0]`/`filter[tags][1]` into the same array
+  /// `filter[tags][]` would have produced. The server accepts both forms;
+  /// this client sends only the indexed one. Do not "simplify" this to
+  /// repeated keys — that silently breaks multiple filters.
   Future<PaginatedRecords> list(
     String resourceKey, {
     int page,
@@ -40,6 +53,7 @@ abstract interface class ResourceDataSource {
     String? sort,
     String? direction,
     bool reorder,
+    Map<String, Object?> filters,
   });
 
   /// GET /{resource}/{id} — the only call that returns per-record permissions.
@@ -170,5 +184,18 @@ abstract interface class ResourceDataSource {
     String field, {
     required List<int> bytes,
     required String filename,
+  });
+}
+
+/// Optional capability for remotely searchable table-filter options.
+///
+/// Kept outside [ResourceDataSource] so existing host-supplied data sources do
+/// not break when upgrading. [RestResourceDataSource] implements it; custom
+/// sources can opt in when they are ready to render `optionsUrl` filters.
+abstract interface class FilterOptionsDataSource {
+  Future<OptionsPage> filterOptions(
+    String resourceKey, {
+    required String filter,
+    required String query,
   });
 }

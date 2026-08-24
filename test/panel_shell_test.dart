@@ -14,6 +14,7 @@ import 'package:filament_mobile/ui/resource_form_screen.dart';
 import 'package:filament_mobile/ui/resource_list_screen.dart';
 import 'package:filament_mobile/ui/resource_row.dart';
 import 'package:filament_mobile/ui/resource_view_screen.dart';
+import 'package:filament_mobile/ui/widget_slots.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -90,6 +91,7 @@ class _ShellSource extends FakeSource {
     String? sort,
     String? direction,
     bool reorder = false,
+    Map<String, Object?> filters = const {},
   }) async {
     listCalls++;
     return PaginatedRecords(
@@ -126,6 +128,7 @@ Future<_ShellSource> _pumpShell(
   WidgetTester tester,
   double width, {
   PanelDirection direction = PanelDirection.ltr,
+  FilamentWidgetRegistry? widgetRegistry,
 }) async {
   tester.view.physicalSize = Size(width, 800);
   tester.view.devicePixelRatio = 1;
@@ -135,7 +138,11 @@ Future<_ShellSource> _pumpShell(
   final panelProvider = PanelProvider(source);
   await tester.pumpWidget(
     MaterialApp(
-      home: PanelShell(source: source, panelProvider: panelProvider),
+      home: PanelShell(
+        source: source,
+        panelProvider: panelProvider,
+        widgetRegistry: widgetRegistry,
+      ),
     ),
   );
   // The drawer's entries are not even built until it opens, so the load is
@@ -184,6 +191,23 @@ ResourceRow _row(WidgetTester tester, String title) => tester.widget(
 );
 
 void main() {
+  testWidgets('forwards one custom-widget registry to owned screens', (
+    tester,
+  ) async {
+    final registry = FilamentWidgetRegistry()
+      ..register(
+        FilamentWidgetSlot.resourceListBeforeContent,
+        (context, scope) => Text(
+          'host widget for ${(scope as ResourceListWidgetScope).resource.key}',
+        ),
+      );
+
+    await _pumpShell(tester, 800, widgetRegistry: registry);
+    await _openPosts(tester);
+
+    expect(find.text('host widget for posts'), findsOneWidget);
+  });
+
   group('compact (400)', () {
     testWidgets('drawer → list → view pushes on the nested navigator', (
       tester,

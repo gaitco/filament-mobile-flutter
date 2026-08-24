@@ -76,6 +76,7 @@ class _ReorderSource implements ResourceDataSource {
     String? sort,
     String? direction,
     bool reorder = false,
+    Map<String, Object?> filters = const {},
   }) async {
     if (reorder && listError != null) throw listError!;
 

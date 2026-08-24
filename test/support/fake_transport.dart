@@ -5,15 +5,12 @@ import 'package:filament_mobile/ports/filament_upload_transport.dart';
 /// Records every call and returns queued responses, so a test can assert the
 /// exact path and query the data source built.
 class FakeTransport implements FilamentTransport {
-  FakeTransport(
-    this._responses, {
-    Map<String, FilamentResponse> writes = const {},
-  }) : _writes = writes;
+  FakeTransport(this._responses, {this.writes = const {}});
 
   final Map<String, Map<String, dynamic>> _responses;
 
   /// Keyed `'<METHOD> <path>'`, e.g. `'POST /api/mobile-panel/banners'`.
-  final Map<String, FilamentResponse> _writes;
+  final Map<String, FilamentResponse> writes;
 
   final List<({String path, Map<String, dynamic>? query, Object? body})> calls =
       [];
@@ -60,7 +57,7 @@ class FakeTransport implements FilamentTransport {
     if (errorToThrow != null) throw errorToThrow!;
 
     final key = '$method $path';
-    final response = _writes[key];
+    final response = writes[key];
     if (response == null) {
       throw StateError('FakeTransport has no response queued for `$key`');
     }

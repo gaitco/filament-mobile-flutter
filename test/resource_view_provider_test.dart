@@ -89,6 +89,7 @@ class FakeSource implements ResourceDataSource {
     String? sort,
     String? direction,
     bool reorder = false,
+    Map<String, Object?> filters = const {},
   }) async => throw UnimplementedError();
 
   @override
@@ -204,6 +205,26 @@ void main() {
       expect(provider.record?.get<String>('name'), 'Original');
       expect(provider.errorMessage, 'لا يوجد اتصال');
     });
+
+    test(
+      'a timer refresh keeps a successful state on transient failure',
+      () async {
+        final source = FakeSource(record: recordWith(name: 'Original'));
+        final provider = ResourceViewProvider(
+          source: source,
+          resource: bannersSchema,
+          id: 7,
+        );
+
+        await provider.load();
+        source.error = const FilamentTransportException('offline');
+        await provider.refresh();
+
+        expect(provider.status, LoadStatus.success);
+        expect(provider.record?.get<String>('name'), 'Original');
+        expect(provider.errorMessage, 'offline');
+      },
+    );
 
     test(
       'a first load still clears, so no stale record leaks between screens',

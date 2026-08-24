@@ -67,6 +67,8 @@ class PanelSchema extends Equatable {
     this.locale = '',
     this.locales = const [],
     this.direction = PanelDirection.ltr,
+    this.poll,
+    this.realtime,
     this.navigation = const [],
     this.resources = const [],
   });
@@ -89,6 +91,8 @@ class PanelSchema extends Equatable {
     // the client re-checks rather than trusting that it did.
     final direction = PanelDirection.fromJson(panel['direction']);
     final locales = stringList(panel, 'locales');
+    final poll = PollConfig.fromJson(panel['poll']);
+    final realtime = RealtimeConfig.fromJson(panel['realtime']);
 
     // Read directly rather than through objects(): the resources array is at
     // the document root, so its children must report `resources[0]`, not
@@ -122,6 +126,8 @@ class PanelSchema extends Equatable {
       locale: opt<String>(panel, 'locale') ?? '',
       locales: locales,
       direction: direction,
+      poll: poll,
+      realtime: realtime,
       navigation: List.generate(
         navigationNodes.length,
         (index) => NavigationGroup.fromJson(
@@ -140,6 +146,7 @@ class PanelSchema extends Equatable {
           'resources[$index]',
           direction: direction,
           locales: locales,
+          poll: poll,
         ),
       ),
     );
@@ -167,6 +174,8 @@ class PanelSchema extends Equatable {
   /// The panel's layout direction. Absent or unrecognised reads as
   /// [PanelDirection.ltr] — see [PanelDirection.fromJson].
   final PanelDirection direction;
+  final PollConfig? poll;
+  final RealtimeConfig? realtime;
   final List<NavigationGroup> navigation;
   final List<ResourceSchema> resources;
 

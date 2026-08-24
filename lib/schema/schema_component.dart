@@ -16,9 +16,27 @@ part 'components/color_component.dart';
 part 'components/file_component.dart';
 part 'components/tags_component.dart';
 part 'components/keyvalue_component.dart';
+part 'components/map_point_component.dart';
+part 'components/phone_component.dart';
 part 'components/repeater_component.dart';
 part 'components/layout_component.dart';
 part 'components/entry_component.dart';
+
+/// An optional node-level override of the panel's layout direction.
+///
+/// Null means inherit the surrounding panel. Kept separate from
+/// `PanelDirection`: the panel always has a normalized fallback, while a
+/// field must preserve absence so inheritance keeps working.
+enum ComponentDirection {
+  ltr,
+  rtl;
+
+  static ComponentDirection? fromJson(Object? value) => switch (value) {
+    'ltr' => ComponentDirection.ltr,
+    'rtl' => ComponentDirection.rtl,
+    _ => null,
+  };
+}
 
 /// One node of a Filament schema tree.
 ///
@@ -41,6 +59,7 @@ sealed class SchemaComponent extends Equatable {
     this.writable = true,
     this.live = false,
     this.translatable = false,
+    this.direction,
     this.rules = const ValidationRules.none(),
   });
 
@@ -57,6 +76,7 @@ sealed class SchemaComponent extends Equatable {
       writable = common.writable,
       live = common.live,
       translatable = common.translatable,
+      direction = common.direction,
       rules = common.rules;
 
   /// The raw contract discriminator, kept so an [UnknownComponent] can name
@@ -92,6 +112,10 @@ sealed class SchemaComponent extends Equatable {
   /// a head-of-name into one field slot with locale chips instead of one
   /// stacked field per locale; see `ResourceFormScreen`'s node walk.
   final bool translatable;
+
+  /// Optional field/entry override. Null inherits the nearest panel-level
+  /// Directionality, so old servers and undeclared fields behave unchanged.
+  final ComponentDirection? direction;
 
   /// Client-side validation hints. A base-node property in the contract (§5.3),
   /// so every consumer can ask "is this required?" without switching over the
@@ -146,6 +170,9 @@ sealed class SchemaComponent extends Equatable {
       'file' => FileComponent._fromJson(json, common, path),
       'tags' => TagsComponent._fromJson(json, common, path),
       'keyvalue' => KeyValueComponent._fromJson(json, common, path),
+      'map_point' ||
+      'map_point_entry' => MapPointComponent._fromJson(json, common, path),
+      'phone' => PhoneComponent._fromJson(json, common),
       'repeater' => RepeaterComponent._fromJson(json, common, path, depth),
       'section' ||
       'grid' ||
@@ -190,8 +217,10 @@ sealed class SchemaComponent extends Equatable {
   /// on that difference needs the equality to see it. `translatable` is
   /// included for the same reason `writable` is: it is what decides whether
   /// this leaf renders inside a locale-chip group at all.
+  /// `direction` can also be closure-backed and flip on `/state`, so it must
+  /// participate too or a widget diff may retain the old override.
   @override
-  List<Object?> get props => [type, name, writable, translatable];
+  List<Object?> get props => [type, name, writable, translatable, direction];
 }
 
 /// The properties every node shares, parsed once so each subclass constructor
@@ -208,6 +237,7 @@ class _CommonProperties {
     required this.writable,
     required this.live,
     required this.translatable,
+    required this.direction,
     required this.rules,
   });
 
@@ -226,6 +256,7 @@ class _CommonProperties {
       writable: opt<bool>(json, 'writable') ?? true,
       live: opt<bool>(json, 'live') ?? false,
       translatable: opt<bool>(json, 'translatable') ?? false,
+      direction: ComponentDirection.fromJson(json['direction']),
       rules: ValidationRules.fromJson(
         opt<Map<String, dynamic>>(json, 'rules') ?? const {},
       ),
@@ -242,6 +273,7 @@ class _CommonProperties {
   final bool writable;
   final bool live;
   final bool translatable;
+  final ComponentDirection? direction;
   final ValidationRules rules;
 }
 

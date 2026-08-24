@@ -305,11 +305,10 @@ void main() {
 
         expect(panel.resources, hasLength(greaterThan(1)));
         for (final resource in panel.resources) {
-          expect(
-            resource.locales,
-            ['ar', 'en'],
-            reason: '${resource.key} did not inherit the panel locales',
-          );
+          expect(resource.locales, [
+            'ar',
+            'en',
+          ], reason: '${resource.key} did not inherit the panel locales');
         }
       });
     });

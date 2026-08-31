@@ -1909,3 +1909,45 @@ they construct and pass their own `FilamentStrings`, exactly as before —
 `forLocale` is a convenience, not a registry this package means to grow. The
 companion `filament_mobile_charts` package mirrors both members on
 `FilamentChartStrings`, for its two fallback messages.
+
+## Status & roadmap
+
+The package is production-released and in daily use; everything documented
+above is shipped and tested (1000+ tests on each side, CI against Filament 4
+and 5). In short, what already works end to end:
+
+- Panel index, lists (search, sort, filters, pagination), record view,
+  create/edit/delete, per-record actions.
+- Some thirty field and entry types, including repeater, single/multi file
+  upload, tags, key/value, slider, toggle buttons, colour, date/time bounds,
+  map points and phone numbers.
+- Relations: read, search/sort, and row create/edit/delete.
+- Dashboard stats and charts, adaptive tablet/desktop layout (`PanelShell`),
+  RTL and i18n, schema caching, background refresh (polling + ETag, with a
+  socket-neutral realtime seam).
+- Host extension points: `FieldRegistry`/`EntryRegistry`,
+  `FilamentWidgetRegistry`, and the `filament_mobile_charts` /
+  `filament_mobile_maps` companion packages.
+
+What is next, in rough priority order — help welcome on any of it:
+
+- **In-app notification bell** over the existing realtime seam (no APNs/FCM
+  push yet; that is a later, separate slice).
+- **In-app UI language picker** — client-side, persisted per device.
+- **Rich-text editing on the client.** Rich content renders today and edits
+  as a plain textarea; a real mobile editor is the largest open item.
+- **Repeater gaps**: `live()` reactivity inside rows, nested repeaters, and
+  row reordering.
+- **Locale-aware value formatting** on entry widgets (dates, numbers).
+- **Pivot attach/detach** for BelongsToMany relations — row create/edit/
+  delete works; attaching an *existing* record does not.
+
+Deliberately out of scope — please do not propose them: a login/auth flow
+(the host app owns authentication and hands this package a transport), bulk
+actions, and `TableWidget` / arbitrary Blade or Livewire views (no data
+contract to read).
+
+Development happens in a private monorepo; this repository is its public
+snapshot. Issues and pull requests are welcome here — accepted changes are
+ported into the monorepo with credit in the changelog and ship in the next
+release, so a PR may be closed as "merged" without a merge commit.

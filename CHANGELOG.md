@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **P22: in-app UI language picker.** `PanelShell` gains `languages` (a list
+  of the new `FilamentLanguageOption` — tag plus host-supplied endonym
+  label), `activeLanguage`, and `onLanguageSelected`; the entries render in
+  the profile menu when at least two languages and the callback are wired,
+  with a check on the active tag. The shell holds no language state:
+  swapping `strings`, setting the app locale, and persisting the choice per
+  device remain the host's, demonstrated end to end in the example app with
+  `shared_preferences`. The profile menu now also shows for languages alone,
+  without `onLogout`.
+
 ## 0.10.0 — 2026-08-24
 
 - **Per-field and per-entry direction overrides.** An optional node-level

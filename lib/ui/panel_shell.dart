@@ -29,6 +29,20 @@ import 'widget_slots.dart';
 /// What the expanded detail pane shows for the selected record.
 enum _Pane { empty, view, form, create }
 
+/// One UI language the host can switch to (P22): the tag the host's own
+/// wiring understands (`'en'`, `'ar'`, whatever the host chose) and the
+/// label shown for it in the picker.
+///
+/// The label is deliberately host-supplied and never translated by this
+/// package — a language names itself in its own script ("العربية", not
+/// "Arabic"), so it reads the same whichever language is currently active.
+class FilamentLanguageOption {
+  const FilamentLanguageOption(this.tag, this.label);
+
+  final String tag;
+  final String label;
+}
+
 /// The one-widget panel: sidebar/rail/drawer, master list and detail pane,
 /// laid out by form factor (P23).
 ///
@@ -55,6 +69,9 @@ class PanelShell extends StatefulWidget {
     this.chartBuilder,
     this.iconFor,
     this.onLogout,
+    this.languages = const [],
+    this.activeLanguage,
+    this.onLanguageSelected,
     this.onLinkTap,
     this.breakpoints = const FilamentBreakpoints(),
     super.key,
@@ -80,6 +97,23 @@ class PanelShell extends StatefulWidget {
 
   /// Adds a profile menu with a log-out item to the dashboard's AppBar.
   final VoidCallback? onLogout;
+
+  /// The UI languages the profile menu offers (P22). Entries render only
+  /// when there are at least two — one language is nothing to switch to —
+  /// and [onLanguageSelected] is wired; either alone draws nothing.
+  final List<FilamentLanguageOption> languages;
+
+  /// The tag of the currently active language, marked with a check in the
+  /// menu. Compared to [FilamentLanguageOption.tag] exactly — the host owns
+  /// both sides of the comparison.
+  final String? activeLanguage;
+
+  /// Called with the chosen [FilamentLanguageOption.tag]. Everything after
+  /// the tap is the host's: swap [strings], persist the choice, rebuild.
+  /// The shell holds no language state of its own — [activeLanguage] is the
+  /// host's word, not an echo of the last tap.
+  final ValueChanged<String>? onLanguageSelected;
+
   final void Function(String href)? onLinkTap;
   final FilamentBreakpoints breakpoints;
 
@@ -297,26 +331,54 @@ class _PanelShellState extends State<PanelShell> {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.strings.dashboardTitle),
-        actions: [if (widget.onLogout != null) _profileMenu()],
+        actions: [
+          if (widget.onLogout != null || _switchableLanguages.isNotEmpty)
+            _profileMenu(),
+        ],
       ),
       drawer: withDrawer ? Drawer(child: _sidebarList()) : null,
       body: _dashboardScreen(),
     );
   }
 
+  /// The language entries the profile menu draws — empty unless the host
+  /// wired [PanelShell.onLanguageSelected] and offered at least two.
+  List<FilamentLanguageOption> get _switchableLanguages =>
+      widget.onLanguageSelected != null && widget.languages.length >= 2
+      ? widget.languages
+      : const [];
+
   Widget _profileMenu() {
+    final languages = _switchableLanguages;
     return PopupMenuButton<void>(
       itemBuilder: (context) => [
-        PopupMenuItem<void>(
-          onTap: widget.onLogout,
-          child: Row(
-            children: [
-              const Icon(Icons.logout),
-              const SizedBox(width: 12),
-              Text(widget.strings.logOut),
-            ],
+        for (final language in languages)
+          PopupMenuItem<void>(
+            onTap: () => widget.onLanguageSelected!(language.tag),
+            child: Row(
+              children: [
+                if (language.tag == widget.activeLanguage)
+                  const Icon(Icons.check)
+                else
+                  const SizedBox(width: 24),
+                const SizedBox(width: 12),
+                Text(language.label),
+              ],
+            ),
           ),
-        ),
+        if (languages.isNotEmpty && widget.onLogout != null)
+          const PopupMenuDivider(),
+        if (widget.onLogout != null)
+          PopupMenuItem<void>(
+            onTap: widget.onLogout,
+            child: Row(
+              children: [
+                const Icon(Icons.logout),
+                const SizedBox(width: 12),
+                Text(widget.strings.logOut),
+              ],
+            ),
+          ),
       ],
       child: const Padding(
         padding: EdgeInsetsDirectional.only(end: 12),

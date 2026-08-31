@@ -13,6 +13,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   filament_mobile:
     path: ../
   # Hosted, not `path: ../../filament_mobile_charts`, because this example
@@ -23,6 +25,9 @@ dependencies:
   # `pubspec_overrides.yaml`.
   filament_mobile_charts: ^0.1.0
   http: ^1.6.0
+  # The P22 language choice persists per device; the package itself takes no
+  # storage dependency, so persistence is host wiring — see main.dart.
+  shared_preferences: ^2.3.0
 
 dev_dependencies:
   flutter_test:

@@ -1,6 +1,8 @@
 import 'package:filament_mobile/filament_mobile.dart';
 import 'package:filament_mobile_charts/filament_mobile_charts.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'http_filament_transport.dart';
 import 'in_memory_schema_cache.dart';
@@ -22,7 +24,18 @@ import 'in_memory_schema_cache.dart';
 /// exists to demonstrate. The profile menu's "Log out" drops the token at
 /// runtime and lands on the same screen, so the signed-out path is one tap
 /// away instead of needing a rebuild.
-void main() => runApp(const FilamentMobileExampleApp());
+///
+/// The UI language (P22) is read before the first frame so the app never
+/// flashes English on an Arabic device — the preference is per device, and
+/// the shell's profile menu is where it changes.
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final prefs = await SharedPreferences.getInstance();
+  runApp(FilamentMobileExampleApp(prefs: prefs));
+}
+
+/// Where the chosen UI language persists between launches.
+const _localePrefsKey = 'filament_locale';
 
 const _baseUrl = String.fromEnvironment('FILAMENT_BASE_URL');
 const _token = String.fromEnvironment('FILAMENT_TOKEN');
@@ -42,17 +55,43 @@ const _prefix = String.fromEnvironment(
 /// demo link tap.
 final _messengerKey = GlobalKey<ScaffoldMessengerState>();
 
-class FilamentMobileExampleApp extends StatelessWidget {
-  const FilamentMobileExampleApp({super.key});
+class FilamentMobileExampleApp extends StatefulWidget {
+  const FilamentMobileExampleApp({required this.prefs, super.key});
+
+  final SharedPreferences prefs;
+
+  @override
+  State<FilamentMobileExampleApp> createState() =>
+      _FilamentMobileExampleAppState();
+}
+
+class _FilamentMobileExampleAppState extends State<FilamentMobileExampleApp> {
+  late String _localeTag = widget.prefs.getString(_localePrefsKey) ?? 'en';
+
+  void _setLocale(String tag) {
+    setState(() => _localeTag = tag);
+    widget.prefs.setString(_localePrefsKey, tag);
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'filament_mobile example',
       scaffoldMessengerKey: _messengerKey,
+      // The app-level locale is what flips text direction and Material's own
+      // widget strings (tooltips, pickers); the package's screen strings flip
+      // with it via `FilamentStrings.forLocale` in `_Session` below.
+      locale: Locale(_localeTag),
+      supportedLocales: const [Locale('en'), Locale('ar')],
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
       home: _baseUrl.isEmpty
           ? const _NotConfigured()
-          : PanelHome(baseUrl: _baseUrl, token: _token),
+          : PanelHome(
+              baseUrl: _baseUrl,
+              token: _token,
+              localeTag: _localeTag,
+              onLocaleSelected: _setLocale,
+            ),
     );
   }
 }
@@ -83,10 +122,18 @@ class _NotConfigured extends StatelessWidget {
 /// form — "log in" restores the compile-time token, standing in for
 /// whatever real authentication a host app does.
 class PanelHome extends StatefulWidget {
-  const PanelHome({required this.baseUrl, required this.token, super.key});
+  const PanelHome({
+    required this.baseUrl,
+    required this.token,
+    required this.localeTag,
+    required this.onLocaleSelected,
+    super.key,
+  });
 
   final String baseUrl;
   final String token;
+  final String localeTag;
+  final ValueChanged<String> onLocaleSelected;
 
   @override
   State<PanelHome> createState() => _PanelHomeState();
@@ -127,6 +174,8 @@ class _PanelHomeState extends State<PanelHome> {
       key: ValueKey(token),
       baseUrl: widget.baseUrl,
       token: token,
+      localeTag: widget.localeTag,
+      onLocaleSelected: widget.onLocaleSelected,
       onLogout: () => setState(() => _sessionToken = null),
     );
   }
@@ -139,12 +188,16 @@ class _Session extends StatefulWidget {
   const _Session({
     required this.baseUrl,
     required this.token,
+    required this.localeTag,
+    required this.onLocaleSelected,
     required this.onLogout,
     super.key,
   });
 
   final String baseUrl;
   final String token;
+  final String localeTag;
+  final ValueChanged<String> onLocaleSelected;
   final VoidCallback onLogout;
 
   @override
@@ -187,11 +240,24 @@ class _SessionState extends State<_Session> {
     return PanelShell(
       source: _source,
       panelProvider: _panelProvider,
+      strings: FilamentStrings.forLocale(widget.localeTag),
       // Charts come from the companion package's builder — the core package
       // deliberately ships no charting dependency of its own.
-      chartBuilder: flChartBuilder(strings: const FilamentChartStrings()),
+      chartBuilder: flChartBuilder(
+        strings: FilamentChartStrings.forLocale(widget.localeTag),
+      ),
       iconFor: _iconFor,
       onLogout: widget.onLogout,
+      // The UI language picker (P22): labels are endonyms, the tags are this
+      // host's own — `forLocale` above and the MaterialApp locale both read
+      // them. Persistence is the host's job; this example uses
+      // shared_preferences at the app root.
+      languages: const [
+        FilamentLanguageOption('en', 'English'),
+        FilamentLanguageOption('ar', 'العربية'),
+      ],
+      activeLanguage: widget.localeTag,
+      onLanguageSelected: widget.onLocaleSelected,
       // The package takes no URL-launcher dependency, so opening a rich-text
       // link is entirely the host's call. This example has no such
       // dependency either, so it echoes the href instead of opening it; a

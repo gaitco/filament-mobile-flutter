@@ -1865,6 +1865,50 @@ Resolve from the schema value instead, via `textDirectionOf(...)`
 (`lib/ui/material_panel_state_builder.dart`), whenever the call site is not
 itself inside `build(BuildContext)`.
 
+## UI language picker
+
+*The shell offers the switch; the host owns everything the switch does.*
+
+`PanelShell` can put a language picker in its profile menu (P22):
+
+```dart
+PanelShell(
+  // ...
+  strings: FilamentStrings.forLocale(localeTag),
+  languages: const [
+    FilamentLanguageOption('en', 'English'),
+    FilamentLanguageOption('ar', 'العربية'),
+  ],
+  activeLanguage: localeTag,
+  onLanguageSelected: (tag) => /* persist tag, rebuild with it */,
+)
+```
+
+The entries render only when the host wired `onLanguageSelected` **and**
+offered at least two languages — one language is nothing to switch to, and a
+list without a callback would draw a control that does nothing when tapped,
+the same principle as `filePickerUnavailable`. Each option's label is an
+endonym the host supplies ("العربية", not "Arabic"): a language naming
+itself reads the same whichever language is currently active, so the labels
+are deliberately never translated by this package.
+
+The shell holds **no language state of its own**. A tap reports the chosen
+tag and nothing else changes until the host acts: swap `strings` (usually
+`FilamentStrings.forLocale`), set the `MaterialApp` locale so text
+direction and Flutter's own widget strings follow, persist the tag so the
+choice survives a relaunch, and pass it back as `activeLanguage` — the
+check mark in the menu is the host's word, not an echo of the last tap.
+Persistence is per device and entirely the host's: the package takes no
+storage dependency, exactly as it takes no HTTP one. The example app wires
+all of this end to end with `shared_preferences` at its root — see
+`example/lib/main.dart`.
+
+This is the *UI* language only, deliberately. The panel's content — labels,
+options, validation messages — already arrives translated in the panel's
+locale, and the panel's published `direction` keeps deciding how package
+screens lay out (see RTL and i18n above); neither is renegotiated by the
+picker, and no request is sent because of it.
+
 ## Strings
 
 *`FilamentStrings` defaults to English, silently.*
@@ -1933,7 +1977,6 @@ What is next, in rough priority order — help welcome on any of it:
 
 - **In-app notification bell** over the existing realtime seam (no APNs/FCM
   push yet; that is a later, separate slice).
-- **In-app UI language picker** — client-side, persisted per device.
 - **Rich-text editing on the client.** Rich content renders today and edits
   as a plain textarea; a real mobile editor is the largest open item.
 - **Repeater gaps**: `live()` reactivity inside rows, nested repeaters, and

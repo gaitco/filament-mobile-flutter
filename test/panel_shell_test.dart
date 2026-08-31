@@ -129,6 +129,10 @@ Future<_ShellSource> _pumpShell(
   double width, {
   PanelDirection direction = PanelDirection.ltr,
   FilamentWidgetRegistry? widgetRegistry,
+  VoidCallback? onLogout,
+  List<FilamentLanguageOption> languages = const [],
+  String? activeLanguage,
+  ValueChanged<String>? onLanguageSelected,
 }) async {
   tester.view.physicalSize = Size(width, 800);
   tester.view.devicePixelRatio = 1;
@@ -142,6 +146,10 @@ Future<_ShellSource> _pumpShell(
         source: source,
         panelProvider: panelProvider,
         widgetRegistry: widgetRegistry,
+        onLogout: onLogout,
+        languages: languages,
+        activeLanguage: activeLanguage,
+        onLanguageSelected: onLanguageSelected,
       ),
     ),
   );
@@ -206,6 +214,90 @@ void main() {
     await _openPosts(tester);
 
     expect(find.text('host widget for posts'), findsOneWidget);
+  });
+
+  group('language picker (P22)', () {
+    const languages = [
+      FilamentLanguageOption('en', 'English'),
+      FilamentLanguageOption('ar', 'العربية'),
+    ];
+
+    Future<void> openMenu(WidgetTester tester) async {
+      await tester.tap(find.byType(CircleAvatar));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('entries with a check on the active tag; tap reports the '
+        'chosen tag', (tester) async {
+      String? chosen;
+      await _pumpShell(
+        tester,
+        400,
+        languages: languages,
+        activeLanguage: 'en',
+        onLanguageSelected: (tag) => chosen = tag,
+        onLogout: () {},
+      );
+      await openMenu(tester);
+
+      expect(find.text('English'), findsOneWidget);
+      expect(find.text('العربية'), findsOneWidget);
+      expect(find.text('Log out'), findsOneWidget);
+      // The check sits beside the active language's label only.
+      expect(
+        find.descendant(
+          of: find.ancestor(
+            of: find.text('English'),
+            matching: find.byType(PopupMenuItem<void>),
+          ),
+          matching: find.byIcon(Icons.check),
+        ),
+        findsOneWidget,
+      );
+      expect(find.byIcon(Icons.check), findsOneWidget);
+
+      await tester.tap(find.text('العربية'));
+      await tester.pumpAndSettle();
+      expect(chosen, 'ar');
+    });
+
+    testWidgets('no callback → no entries; menu still shows for onLogout', (
+      tester,
+    ) async {
+      await _pumpShell(tester, 400, languages: languages, onLogout: () {});
+      await openMenu(tester);
+
+      expect(find.text('English'), findsNothing);
+      expect(find.text('Log out'), findsOneWidget);
+    });
+
+    testWidgets('one language is nothing to switch to', (tester) async {
+      await _pumpShell(
+        tester,
+        400,
+        languages: const [FilamentLanguageOption('en', 'English')],
+        onLanguageSelected: (_) {},
+      );
+
+      // Without onLogout either, the whole profile menu stays hidden —
+      // exactly the pre-P22 AppBar.
+      expect(find.byType(CircleAvatar), findsNothing);
+    });
+
+    testWidgets('languages alone show the menu without a log-out item', (
+      tester,
+    ) async {
+      await _pumpShell(
+        tester,
+        400,
+        languages: languages,
+        onLanguageSelected: (_) {},
+      );
+      await openMenu(tester);
+
+      expect(find.text('English'), findsOneWidget);
+      expect(find.text('Log out'), findsNothing);
+    });
   });
 
   group('compact (400)', () {

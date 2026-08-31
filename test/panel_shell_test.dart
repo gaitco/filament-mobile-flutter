@@ -1,7 +1,12 @@
+import 'dart:async';
+
 import 'package:filament_mobile/dashboard/dashboard_data.dart';
 import 'package:filament_mobile/data/paginated_records.dart';
+import 'package:filament_mobile/data/panel_notification.dart';
+import 'package:filament_mobile/data/resource_data_source.dart';
 import 'package:filament_mobile/data/resource_record.dart';
 import 'package:filament_mobile/data/write_result.dart';
+import 'package:filament_mobile/ports/filament_event_transport.dart';
 import 'package:filament_mobile/ports/filament_strings.dart';
 import 'package:filament_mobile/schema/card_layout.dart';
 import 'package:filament_mobile/schema/panel_schema.dart';
@@ -55,24 +60,27 @@ ResourceSchema _resource(String key, String plural) => ResourceSchema(
 
 /// Two resources, three records each, every write succeeding.
 class _ShellSource extends FakeSource {
-  _ShellSource({PanelDirection direction = PanelDirection.ltr})
-    : _panel = PanelSchema(
-        version: PanelSchema.supportedVersion,
-        id: 'admin',
-        title: 'Admin',
-        direction: direction,
-        resources: [_resource('posts', 'Posts'), _resource('tags', 'Tags')],
-      ),
-      super(
-        components: [
-          SchemaComponent.fromJson(const {
-            'type': 'text',
-            'name': 'name',
-            'label': 'Name',
-          }, 'posts.form[0]'),
-        ],
-        writeResult: const WriteSuccess({'id': 9}),
-      );
+  _ShellSource({
+    PanelDirection direction = PanelDirection.ltr,
+    NotificationsConfig? notifications,
+  }) : _panel = PanelSchema(
+         version: PanelSchema.supportedVersion,
+         id: 'admin',
+         title: 'Admin',
+         direction: direction,
+         notifications: notifications,
+         resources: [_resource('posts', 'Posts'), _resource('tags', 'Tags')],
+       ),
+       super(
+         components: [
+           SchemaComponent.fromJson(const {
+             'type': 'text',
+             'name': 'name',
+             'label': 'Name',
+           }, 'posts.form[0]'),
+         ],
+         writeResult: const WriteSuccess({'id': 9}),
+       );
 
   final PanelSchema _panel;
   int listCalls = 0;
@@ -133,12 +141,14 @@ Future<_ShellSource> _pumpShell(
   List<FilamentLanguageOption> languages = const [],
   String? activeLanguage,
   ValueChanged<String>? onLanguageSelected,
+  _ShellSource? source,
+  FilamentEventTransport? eventTransport,
 }) async {
   tester.view.physicalSize = Size(width, 800);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
 
-  final source = _ShellSource(direction: direction);
+  source ??= _ShellSource(direction: direction);
   final panelProvider = PanelProvider(source);
   await tester.pumpWidget(
     MaterialApp(
@@ -146,6 +156,7 @@ Future<_ShellSource> _pumpShell(
         source: source,
         panelProvider: panelProvider,
         widgetRegistry: widgetRegistry,
+        eventTransport: eventTransport,
         onLogout: onLogout,
         languages: languages,
         activeLanguage: activeLanguage,
@@ -197,6 +208,92 @@ Future<void> _openRelated(WidgetTester tester) async {
 ResourceRow _row(WidgetTester tester, String title) => tester.widget(
   find.ancestor(of: find.text(title), matching: find.byType(ResourceRow)),
 );
+
+/// A [_ShellSource] that also implements the notifications sidecar (P21) —
+/// the panel node defaults to declared, so constructing one is the "both
+/// gates open" fixture. The base [_ShellSource]/[FakeSource] deliberately do
+/// NOT implement [NotificationsDataSource]: every pre-P21 shell test above
+/// doubles as proof the bell stays hidden for a host that never opted in.
+class _NotifyingSource extends _ShellSource implements NotificationsDataSource {
+  _NotifyingSource({
+    this.unread = 2,
+    super.notifications = const NotificationsConfig(
+      poll: Duration(seconds: 30),
+    ),
+  });
+
+  int unread;
+  int notificationsCalls = 0;
+  final readIds = <String>[];
+  final deletedIds = <String>[];
+  int markAllCalls = 0;
+  bool cleared = false;
+
+  @override
+  Future<NotificationsPage> notifications({int page = 1}) async {
+    notificationsCalls++;
+    return NotificationsPage(
+      items: [
+        PanelNotification(
+          id: 'n-1',
+          title: 'Order shipped',
+          body: 'Order #7 left the warehouse',
+          status: 'success',
+          date: DateTime.now().subtract(const Duration(minutes: 5)),
+        ),
+        PanelNotification(
+          id: 'n-2',
+          title: 'Welcome',
+          readAt: DateTime.now().subtract(const Duration(days: 1)),
+        ),
+      ],
+      unread: unread,
+    );
+  }
+
+  @override
+  Future<int> markNotificationRead(String id) async {
+    readIds.add(id);
+    return unread = unread > 0 ? unread - 1 : 0;
+  }
+
+  @override
+  Future<int> markAllNotificationsRead() async {
+    markAllCalls++;
+    return unread = 0;
+  }
+
+  @override
+  Future<void> deleteNotification(String id) async => deletedIds.add(id);
+
+  @override
+  Future<void> clearNotifications() async => cleared = true;
+}
+
+/// A [_NotifyingSource] whose panel also publishes the user's private
+/// notification channel — the realtime-configured host.
+class _ChannelNotifyingSource extends _NotifyingSource {
+  _ChannelNotifyingSource()
+    : super(
+        notifications: const NotificationsConfig(
+          poll: Duration(seconds: 30),
+          channel: 'App.Models.User.7',
+        ),
+      );
+}
+
+/// The `_EventTransport` idiom from realtime_signals_test.dart: sync
+/// broadcast streams a test can push invalidation events into.
+class _BellEventTransport implements FilamentEventTransport {
+  final controllers = <String, StreamController<RealtimeEvent>>{};
+
+  @override
+  Stream<RealtimeEvent> events(String channel) =>
+      (controllers[channel] ??= StreamController.broadcast(sync: true)).stream;
+
+  void add(String channel, RealtimeEvent event) =>
+      controllers[channel]!.add(event);
+}
 
 void main() {
   testWidgets('forwards one custom-widget registry to owned screens', (
@@ -297,6 +394,146 @@ void main() {
 
       expect(find.text('English'), findsOneWidget);
       expect(find.text('Log out'), findsNothing);
+    });
+  });
+
+  group('notification bell (P21)', () {
+    const bellKey = ValueKey('panel.notifications.bell');
+
+    Badge bellBadge(WidgetTester tester) => tester.widget<Badge>(
+      find.descendant(of: find.byKey(bellKey), matching: find.byType(Badge)),
+    );
+
+    testWidgets('hidden when the panel declares no notifications node', (
+      tester,
+    ) async {
+      // The default _ShellSource has no node AND no sidecar — the pre-P21
+      // AppBar exactly.
+      await _pumpShell(tester, 400);
+      expect(find.byKey(bellKey), findsNothing);
+    });
+
+    testWidgets('hidden when the source lacks the sidecar, even declared', (
+      tester,
+    ) async {
+      await _pumpShell(
+        tester,
+        400,
+        source: _ShellSource(
+          notifications: const NotificationsConfig(poll: Duration(seconds: 30)),
+        ),
+      );
+      expect(find.byKey(bellKey), findsNothing);
+    });
+
+    testWidgets('visible with the unread count on the badge', (tester) async {
+      await _pumpShell(tester, 400, source: _NotifyingSource());
+
+      expect(find.byKey(bellKey), findsOneWidget);
+      expect(bellBadge(tester).isLabelVisible, isTrue);
+      expect(
+        find.descendant(of: find.byKey(bellKey), matching: find.text('2')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('badge label hides at zero', (tester) async {
+      await _pumpShell(tester, 400, source: _NotifyingSource(unread: 0));
+
+      expect(find.byKey(bellKey), findsOneWidget);
+      expect(bellBadge(tester).isLabelVisible, isFalse);
+    });
+
+    testWidgets('bell opens the sheet with rows; row tap marks read', (
+      tester,
+    ) async {
+      final source = _NotifyingSource();
+      await _pumpShell(tester, 400, source: source);
+
+      await tester.tap(find.byKey(bellKey));
+      await tester.pumpAndSettle();
+      expect(find.text('Order shipped'), findsOneWidget);
+      expect(find.text('Order #7 left the warehouse'), findsOneWidget);
+      expect(find.text('Welcome'), findsOneWidget);
+
+      await tester.tap(find.text('Order shipped'));
+      await tester.pumpAndSettle();
+      expect(source.readIds, ['n-1']);
+      expect(
+        find.descendant(of: find.byKey(bellKey), matching: find.text('1')),
+        findsOneWidget,
+        reason: 'the badge takes the server-answered count',
+      );
+    });
+
+    testWidgets('mark-all-read shows only while unread, and zeroes the badge', (
+      tester,
+    ) async {
+      final source = _NotifyingSource();
+      await _pumpShell(tester, 400, source: source);
+      await tester.tap(find.byKey(bellKey));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('notifications.markAllRead')));
+      await tester.pumpAndSettle();
+
+      expect(source.markAllCalls, 1);
+      expect(bellBadge(tester).isLabelVisible, isFalse);
+      expect(
+        find.byKey(const ValueKey('notifications.markAllRead')),
+        findsNothing,
+        reason: 'nothing left to mark',
+      );
+    });
+
+    testWidgets('clear-all asks first, then empties the feed', (tester) async {
+      final source = _NotifyingSource();
+      await _pumpShell(tester, 400, source: source);
+      await tester.tap(find.byKey(bellKey));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('notifications.clearAll')));
+      await tester.pumpAndSettle();
+      expect(
+        find.text(const FilamentStrings().clearNotificationsTitle),
+        findsOneWidget,
+      );
+      expect(source.cleared, isFalse, reason: 'nothing deleted before confirm');
+
+      await tester.tap(
+        find.byKey(const ValueKey('notifications.clearAll.confirm')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(source.cleared, isTrue);
+      expect(
+        find.text(const FilamentStrings().notificationsEmpty),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a realtime event refreshes through the published channel', (
+      tester,
+    ) async {
+      final transport = _BellEventTransport();
+      final source = _ChannelNotifyingSource();
+      await _pumpShell(tester, 400, source: source, eventTransport: transport);
+      final calls = source.notificationsCalls;
+
+      source.unread = 5;
+      transport.add(
+        'App.Models.User.7',
+        // Filament's own `database-notifications.sent` carries an empty
+        // payload — any event on the channel is a refetch signal.
+        const RealtimeEvent.changed(resourceKey: 'notifications'),
+      );
+      await tester.pumpAndSettle();
+
+      expect(source.notificationsCalls, calls + 1);
+      expect(
+        find.descendant(of: find.byKey(bellKey), matching: find.text('5')),
+        findsOneWidget,
+      );
     });
   });
 

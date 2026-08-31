@@ -111,6 +111,39 @@ class RealtimeConfig extends Equatable {
   List<Object?> get props => [key, host, port, scheme, authEndpoint];
 }
 
+/// The panel's in-app notification bell (P21), present iff the host opted in.
+///
+/// Parsing follows `panel.poll`'s fail-closed rule: a malformed `poll` drops
+/// the WHOLE node — the bell is an additive capability, never a reason to
+/// reject an otherwise usable panel document. `channel` is the user's private
+/// notification channel, published by the server (never reconstructed
+/// client-side — its name derives from the host's User FQCN, which this
+/// client cannot know); absent or malformed reads as poll-only.
+class NotificationsConfig extends Equatable {
+  const NotificationsConfig({required this.poll, this.channel});
+
+  static NotificationsConfig? fromJson(Object? value) {
+    if (value is! Map<String, dynamic>) return null;
+
+    final poll = _pollSeconds(value['poll']);
+    if (poll == null) return null;
+
+    final channel = value['channel'];
+    final trimmed = channel is String ? channel.trim() : '';
+
+    return NotificationsConfig(
+      poll: poll,
+      channel: trimmed.isEmpty ? null : trimmed,
+    );
+  }
+
+  final Duration poll;
+  final String? channel;
+
+  @override
+  List<Object?> get props => [poll, channel];
+}
+
 Duration? _pollSeconds(Object? value) =>
     value is int && value >= 1 && value <= 3600
     ? Duration(seconds: value)

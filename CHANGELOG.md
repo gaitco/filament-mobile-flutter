@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **P21: the in-app notification bell.** `PanelShell` draws a bell with an
+  unread badge in the dashboard AppBar when the panel declares
+  `panel.notifications` AND the data source implements the new
+  `NotificationsDataSource` sidecar (the `FilterOptionsDataSource`
+  precedent — no breaking change for host data sources), refreshed by the
+  P20 polling/realtime seam (interval from the node, the user's private
+  channel when published, 4× watchdog). Tapping it opens the notifications
+  panel — bottom sheet on compact, dialog on wider — with mark-read on tap,
+  mark-all-read, per-row dismiss, confirm-gated clear-all, relative
+  timestamps, and URL actions through `onLinkTap`. New public surface:
+  `NotificationsConfig`, `PanelNotification`/`NotificationAction`/
+  `NotificationsPage`, `NotificationsProvider`, `NotificationsSheet`, and
+  the notification strings (EN/AR) on `FilamentStrings`.
+
 - **P22: in-app UI language picker.** `PanelShell` gains `languages` (a list
   of the new `FilamentLanguageOption` — tag plus host-supplied endonym
   label), `activeLanguage`, and `onLanguageSelected`; the entries render in

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -10,7 +11,10 @@ import '../ports/filament_event_transport.dart';
 import '../ports/filament_strings.dart';
 import '../schema/resource_schema.dart';
 import '../state/dashboard_provider.dart';
+import '../state/notifications_provider.dart';
 import '../state/panel_provider.dart';
+import '../state/polling_signals.dart';
+import '../state/realtime_signals.dart';
 import '../state/relation_list_provider.dart';
 import '../state/resource_form_provider.dart';
 import '../state/resource_list_provider.dart';
@@ -19,6 +23,7 @@ import 'dashboard_screen.dart';
 import 'entry_registry.dart';
 import 'layout.dart';
 import 'material_panel_state_builder.dart';
+import 'notifications_sheet.dart';
 import 'relation_list_screen.dart';
 import 'resource_form_screen.dart';
 import 'resource_list_screen.dart';
@@ -141,12 +146,67 @@ class _PanelShellState extends State<PanelShell> {
   _Pane _pane = _Pane.empty;
   FilamentFormFactor? _factor;
 
+  /// The bell's feed and its refresh pair (P21) — the fourth consumer of
+  /// the P20 seam, owned here in the shell because the badge outlives every
+  /// screen. Created only once the panel declares `notifications` AND the
+  /// source implements the sidecar, the same double gate the bell renders
+  /// under.
+  NotificationsProvider? _notifications;
+  PollingSignals? _notifyPolling;
+  RealtimeSignals? _notifyRealtime;
+  NotificationsConfig? _notifyConfig;
+
   @override
   void initState() {
     super.initState();
+    widget.panelProvider.addListener(_configureNotifications);
+    _configureNotifications();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (widget.panelProvider.status.isInitial) widget.panelProvider.load();
     });
+  }
+
+  /// (Re)builds the bell's polling/realtime pair whenever the panel's
+  /// `notifications` declaration changes — including on the panel's first
+  /// load, which is why this listens on [PanelShell.panelProvider].
+  // ponytail: the badge polls whenever the shell is foreground, even while
+  // the bell is off-screen behind a resource — one ETag'd ~200-byte request
+  // per interval; visibility-gate it if that ever matters.
+  void _configureNotifications() {
+    final config = widget.panelProvider.panel?.notifications;
+    if (config == _notifyConfig) return;
+    _notifyConfig = config;
+
+    _notifyPolling?.dispose();
+    _notifyPolling = null;
+    unawaited(_notifyRealtime?.dispose());
+    _notifyRealtime = null;
+
+    if (config == null || widget.source is! NotificationsDataSource) return;
+
+    final provider = _notifications ??= NotificationsProvider(widget.source);
+    if (provider.status.isInitial) unawaited(provider.load());
+
+    final eventTransport = widget.eventTransport;
+    if (eventTransport != null && config.channel != null) {
+      _notifyRealtime = RealtimeSignals(
+        transport: eventTransport,
+        // The server publishes Filament's own `database-notifications.sent`
+        // on this channel; any event on it is a refetch signal — the P20
+        // invalidation-hint discipline, fields unused.
+        channels: [config.channel!],
+        canSignal: () => mounted && !provider.status.isLoading,
+        onSignal: provider.refresh,
+      )..start();
+    }
+
+    _notifyPolling = PollingSignals(
+      // Watchdog cadence (interval × 4) when realtime is live, same as the
+      // dashboard's pair.
+      interval: _notifyRealtime == null ? config.poll : config.poll * 4,
+      canPoll: () => mounted && !provider.status.isLoading,
+      onPoll: provider.refresh,
+    )..start();
   }
 
   @override
@@ -188,6 +248,10 @@ class _PanelShellState extends State<PanelShell> {
 
   @override
   void dispose() {
+    widget.panelProvider.removeListener(_configureNotifications);
+    _notifyPolling?.dispose();
+    unawaited(_notifyRealtime?.dispose());
+    _notifications?.dispose();
     _dashboard.dispose();
     for (final provider in _listProviders.values) {
       provider.dispose();
@@ -332,12 +396,78 @@ class _PanelShellState extends State<PanelShell> {
       appBar: AppBar(
         title: Text(widget.strings.dashboardTitle),
         actions: [
+          // The double gate (P21): the server declared the feature AND the
+          // host's source can serve it — the P22/`filePickerUnavailable`
+          // principle, so a control the host cannot honour is never drawn.
+          if (widget.panelProvider.panel?.notifications != null &&
+              widget.source is NotificationsDataSource &&
+              _notifications != null)
+            _notificationsBell(_notifications!),
           if (widget.onLogout != null || _switchableLanguages.isNotEmpty)
             _profileMenu(),
         ],
       ),
       drawer: withDrawer ? Drawer(child: _sidebarList()) : null,
       body: _dashboardScreen(),
+    );
+  }
+
+  Widget _notificationsBell(NotificationsProvider provider) {
+    return ListenableBuilder(
+      listenable: provider,
+      builder: (context, _) {
+        // Same reason DashboardScreen flushes from build: an event that
+        // arrived while the provider was mid-refresh stays pending until
+        // something asks again, and the badge's rebuild is that ask.
+        unawaited(_notifyRealtime?.flush());
+        final unread = provider.unread;
+
+        return IconButton(
+          key: const ValueKey('panel.notifications.bell'),
+          tooltip: widget.strings.notificationsTitle,
+          onPressed: () => _openNotifications(provider),
+          icon: Badge(
+            isLabelVisible: unread > 0,
+            label: Text(unread > 99 ? '99+' : '$unread'),
+            child: const Icon(Icons.notifications_outlined),
+          ),
+        );
+      },
+    );
+  }
+
+  /// `showModalBottomSheet` on compact, a 420-wide dialog on
+  /// medium/expanded — `_openFilterSheet`'s exact split
+  /// (`ResourceListScreen`), including re-applying the panel `Directionality`
+  /// inside the overlay: a sheet/dialog route is a sibling of this screen in
+  /// the Navigator's overlay, so it inherits nothing, and the direction is
+  /// resolved from the schema value, never `Directionality.of` here.
+  Future<void> _openNotifications(NotificationsProvider provider) async {
+    final direction = textDirectionOf(
+      widget.panelProvider.panel?.direction ?? PanelDirection.ltr,
+    );
+    final sheet = NotificationsSheet(
+      provider: provider,
+      strings: widget.strings,
+      onLinkTap: widget.onLinkTap,
+    );
+
+    if (_factor == FilamentFormFactor.compact) {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        builder: (sheetContext) =>
+            Directionality(textDirection: direction, child: sheet),
+      );
+      return;
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => Directionality(
+        textDirection: direction,
+        child: Dialog(child: SizedBox(width: 420, child: sheet)),
+      ),
     );
   }
 

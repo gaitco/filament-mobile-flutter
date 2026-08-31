@@ -1607,6 +1607,45 @@ be masked by a stale panel sitting in `success`.
 - **No eviction.** One document per key, overwritten in place; a host that
   creates unbounded keys grows unbounded storage.
 
+## Notifications
+
+The in-app bell (P21). `PanelShell` draws it in the dashboard AppBar under
+a double gate: the panel declared `panel.notifications` **and** the data
+source implements `NotificationsDataSource` — a control the host cannot
+serve is never drawn, the `filePickerUnavailable` principle.
+`RestResourceDataSource` implements it already, so a REST host gets the
+bell by flipping the server config; a custom data source opts in by
+implementing the sidecar interface (kept outside `ResourceDataSource`, the
+`FilterOptionsDataSource` precedent, so existing implementations do not
+break):
+
+```dart
+class MySource implements ResourceDataSource, NotificationsDataSource { ... }
+```
+
+The badge refreshes through the same seam as every other screen (P20):
+polling at the published interval — 30 seconds by default, one ETag'd
+request that is a ~200-byte 304 when nothing changed — and, when the panel
+also publishes the user's private notification `channel` and the host
+supplied a `FilamentEventTransport`, push replaces the cadence with the
+usual 4× watchdog. Forward any event on that channel as an invalidation;
+the fields are unused (Filament's `database-notifications.sent` carries an
+empty payload by design).
+
+Tapping the bell opens the feed — a bottom sheet on compact, a dialog on
+medium/expanded, panel-`Directionality` re-applied inside like every
+overlay. Row tap marks it read; the header offers mark-all-read and a
+confirm-gated clear-all (it deletes read and unread alike — the web
+bell's own semantics); each row can be dismissed; a notification's
+url-carrying actions render as buttons only when the host wired
+`onLinkTap`, the rich-text link rule. Timestamps are relative for the
+recent past ("3 hours ago", localized through `FilamentStrings`) and fall
+back to an absolute date beyond 30 days — no intl dependency.
+
+The feed shows the first page of notifications; sending happens entirely
+server-side through Filament's own `sendToDatabase`, and this package adds
+no push notifications — APNs/FCM is a later, separate slice.
+
 ## Dashboard
 
 *Stats render; charts come from the opt-in sibling package, or your own builder.*
@@ -1975,8 +2014,8 @@ and 5). In short, what already works end to end:
 
 What is next, in rough priority order — help welcome on any of it:
 
-- **In-app notification bell** over the existing realtime seam (no APNs/FCM
-  push yet; that is a later, separate slice).
+- **Push notifications (APNs/FCM)** — the in-app bell shipped; delivering
+  its feed while the app is closed is the natural next slice.
 - **Rich-text editing on the client.** Rich content renders today and edits
   as a plain textarea; a real mobile editor is the largest open item.
 - **Repeater gaps**: `live()` reactivity inside rows, nested repeaters, and

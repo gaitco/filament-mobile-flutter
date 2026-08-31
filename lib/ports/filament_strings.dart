@@ -58,6 +58,18 @@ class FilamentStrings {
     this.noRecordSelected = 'Select a record',
     this.dashboardTitle = 'Dashboard',
     this.logOut = 'Log out',
+    this.notificationsTitle = 'Notifications',
+    this.notificationsEmpty = 'No notifications yet',
+    this.markAllRead = 'Mark all as read',
+    this.clearNotificationsTitle = 'Clear all notifications?',
+    this.clearNotificationsBody =
+        'Read and unread alike will be removed. This cannot be undone.',
+    this.clearNotificationsConfirm = 'Clear',
+    this.dismissNotification = 'Dismiss',
+    this.timeJustNow = 'Just now',
+    this.timeMinutesAgo = _defaultMinutesAgo,
+    this.timeHoursAgo = _defaultHoursAgo,
+    this.timeDaysAgo = _defaultDaysAgo,
   });
 
   final String retry;
@@ -248,6 +260,42 @@ class FilamentStrings {
   /// `onLogout`.
   final String logOut;
 
+  /// The notification bell's tooltip and the sheet's header (P21) — the
+  /// bell itself renders only when the panel published `notifications` AND
+  /// the source implements `NotificationsDataSource`, `PanelShell`'s double
+  /// gate.
+  final String notificationsTitle;
+
+  /// Shown by `NotificationsSheet` when a load succeeds with zero rows.
+  final String notificationsEmpty;
+
+  /// `NotificationsSheet`'s header action, shown only while `unread > 0`.
+  final String markAllRead;
+
+  /// The confirm dialog `NotificationsSheet`'s clear-all action opens —
+  /// clear deletes read and unread alike, the delete-record confirm
+  /// precedent. [cancel] is reused for the dismissing button.
+  final String clearNotificationsTitle;
+  final String clearNotificationsBody;
+  final String clearNotificationsConfirm;
+
+  /// Tooltip on a notification row's per-row close control — icon-only, so
+  /// it needs an accessible name for the same reason [create]/[edit] do.
+  final String dismissNotification;
+
+  /// Relative timestamps on `NotificationsSheet`'s rows. Parameterised
+  /// closures rather than `'%s'` templates — the [fieldMin] precedent,
+  /// because Arabic places the number differently. Older than 30 days falls
+  /// back to the absolute date, formatted by the sheet itself.
+  final String timeJustNow;
+  final String Function(int) timeMinutesAgo;
+  final String Function(int) timeHoursAgo;
+  final String Function(int) timeDaysAgo;
+
+  static String _defaultMinutesAgo(int n) => '$n minutes ago';
+  static String _defaultHoursAgo(int n) => '$n hours ago';
+  static String _defaultDaysAgo(int n) => '$n days ago';
+
   static String _defaultMin(num bound) => 'Must be at least $bound';
   static String _defaultMax(num bound) => 'Must be at most $bound';
 
@@ -327,6 +375,18 @@ class FilamentStrings {
     noRecordSelected: 'اختر سجلًا',
     dashboardTitle: 'لوحة التحكم',
     logOut: 'تسجيل الخروج',
+    notificationsTitle: 'الإشعارات',
+    notificationsEmpty: 'لا توجد إشعارات بعد',
+    markAllRead: 'تحديد الكل كمقروء',
+    clearNotificationsTitle: 'هل تريد مسح كل الإشعارات؟',
+    clearNotificationsBody:
+        'سيُحذف المقروء وغير المقروء معًا. لا يمكن التراجع عن هذا الإجراء.',
+    clearNotificationsConfirm: 'مسح',
+    dismissNotification: 'إغلاق',
+    timeJustNow: 'الآن',
+    timeMinutesAgo: (n) => 'قبل $n دقيقة',
+    timeHoursAgo: (n) => 'قبل $n ساعة',
+    timeDaysAgo: (n) => 'قبل $n يوم',
   );
 
   /// The one resolver the common case needs: a locale in, strings out.

@@ -69,6 +69,7 @@ class PanelSchema extends Equatable {
     this.direction = PanelDirection.ltr,
     this.poll,
     this.realtime,
+    this.notifications,
     this.navigation = const [],
     this.resources = const [],
   });
@@ -93,6 +94,7 @@ class PanelSchema extends Equatable {
     final locales = stringList(panel, 'locales');
     final poll = PollConfig.fromJson(panel['poll']);
     final realtime = RealtimeConfig.fromJson(panel['realtime']);
+    final notifications = NotificationsConfig.fromJson(panel['notifications']);
 
     // Read directly rather than through objects(): the resources array is at
     // the document root, so its children must report `resources[0]`, not
@@ -128,6 +130,7 @@ class PanelSchema extends Equatable {
       direction: direction,
       poll: poll,
       realtime: realtime,
+      notifications: notifications,
       navigation: List.generate(
         navigationNodes.length,
         (index) => NavigationGroup.fromJson(
@@ -176,6 +179,11 @@ class PanelSchema extends Equatable {
   final PanelDirection direction;
   final PollConfig? poll;
   final RealtimeConfig? realtime;
+
+  /// The in-app notification bell (P21). Absent — the host never opted in,
+  /// or its declaration was malformed — means the feature is off and
+  /// `PanelShell` draws no bell; see [NotificationsConfig.fromJson].
+  final NotificationsConfig? notifications;
   final List<NavigationGroup> navigation;
   final List<ResourceSchema> resources;
 

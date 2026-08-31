@@ -10,6 +10,7 @@ import '../schema/schema_component.dart';
 import 'action_result.dart';
 import 'options_page.dart';
 import 'paginated_records.dart';
+import 'panel_notification.dart';
 import 'resource_data_source.dart';
 import 'resource_record.dart';
 import 'schema_cache_store.dart';
@@ -24,7 +25,10 @@ import 'write_result.dart';
 /// also persists it across restarts and revalidates it with a conditional
 /// GET — see [cache] and [cacheKey] — through a [SchemaCacheStore].
 class RestResourceDataSource
-    implements ResourceDataSource, FilterOptionsDataSource {
+    implements
+        ResourceDataSource,
+        FilterOptionsDataSource,
+        NotificationsDataSource {
   RestResourceDataSource({
     required FilamentTransport transport,
     String prefix = '/api/mobile-panel',
@@ -424,6 +428,54 @@ class RestResourceDataSource
       ],
       hasMore: body['hasMore'] == true,
     );
+  }
+
+  /// The notification list goes through [_read] so the badge poll inherits
+  /// conditional GET/304 — an unchanged feed is ~200 bytes per interval.
+  @override
+  Future<NotificationsPage> notifications({int page = 1}) async =>
+      NotificationsPage.fromJson(
+        await _read('$prefix/notifications', query: {'page': '$page'}),
+      );
+
+  @override
+  Future<int> markNotificationRead(String id) async => _unreadOf(
+    await _transport.post('$prefix/notifications/$id/read', const {}),
+  );
+
+  @override
+  Future<int> markAllNotificationsRead() async => _unreadOf(
+    await _transport.post('$prefix/notifications/read-all', const {}),
+  );
+
+  @override
+  Future<void> deleteNotification(String id) async {
+    final response = await _transport.delete('$prefix/notifications/$id');
+    _requireSuccess(response);
+  }
+
+  @override
+  Future<void> clearNotifications() async {
+    final response = await _transport.delete('$prefix/notifications');
+    _requireSuccess(response);
+  }
+
+  /// Like `reorder()`/`state()`: the notification mutations carry no
+  /// data-carrying failure outcome, so a non-2xx throws rather than the
+  /// caller mistaking a 403/404 for a silent no-op.
+  void _requireSuccess(FilamentResponse response) {
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw FilamentTransportException(_messageOf(response.body));
+    }
+  }
+
+  /// `{ "unread": n }` parsed leniently — a wrong-typed count reads as 0, the
+  /// same conservative default the badge itself uses — after the usual
+  /// non-2xx check.
+  int _unreadOf(FilamentResponse response) {
+    _requireSuccess(response);
+    final unread = response.body['unread'];
+    return unread is int && unread >= 0 ? unread : 0;
   }
 
   @override

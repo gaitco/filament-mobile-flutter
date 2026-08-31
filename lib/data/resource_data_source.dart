@@ -3,6 +3,7 @@ import '../schema/panel_schema.dart';
 import '../schema/relation_descriptor.dart';
 import 'action_result.dart';
 import 'options_page.dart';
+import 'panel_notification.dart';
 import '../schema/schema_component.dart';
 import 'paginated_records.dart';
 import 'resource_record.dart';
@@ -198,4 +199,29 @@ abstract interface class FilterOptionsDataSource {
     required String filter,
     required String query,
   });
+}
+
+/// Optional capability for the in-app notification bell (P21).
+///
+/// A sidecar like [FilterOptionsDataSource], for the same reason: existing
+/// host-supplied data sources must not break when upgrading.
+/// [RestResourceDataSource] implements it; `PanelShell` draws the bell only
+/// when the panel declared `notifications` AND the source implements this —
+/// the double gate, so a capability the host cannot serve is never rendered.
+abstract interface class NotificationsDataSource {
+  /// GET /notifications?page=N — newest first, plus the top-level `unread`.
+  Future<NotificationsPage> notifications({int page});
+
+  /// POST /notifications/{id}/read — answers the new unread count.
+  Future<int> markNotificationRead(String id);
+
+  /// POST /notifications/read-all — answers the new unread count (0).
+  Future<int> markAllNotificationsRead();
+
+  /// DELETE /notifications/{id} — Filament's per-row "close".
+  Future<void> deleteNotification(String id);
+
+  /// DELETE /notifications — deletes read AND unread, mirroring the web
+  /// bell's `clearNotifications()` verbatim.
+  Future<void> clearNotifications();
 }

@@ -1419,6 +1419,76 @@ The event is an invalidation hint, never record data. A client must not render
 its fields directly. If `panel.poll` is also present, it remains a bounded
 fallback for resources without channels and for connection gaps.
 
+## Optional `panel.notifications` and the notification feed
+
+An opted-in server publishes the in-app bell's declaration at
+`panel.notifications`:
+
+```json
+{ "poll": 30, "channel": "App.Models.User.7" }
+```
+
+- `poll`: seconds between badge revalidations, a positive integer bounded
+  1–3600 like `panel.poll`; 30 is the server default — Filament's own bell
+  cadence. A malformed interval drops the whole node.
+- `channel`: the user's private notification channel, present only when
+  `panel.realtime` is also published and the schema was built for an
+  authenticated user. Published, never reconstructed client-side — the name
+  derives from the host's user class (or its
+  `receivesBroadcastNotificationsOn()` override), which a client cannot
+  know. The event on it is Filament's own `database-notifications.sent`, an
+  empty-payload refetch signal: any event on this channel means "revalidate
+  the feed", never record data. An absent `channel` means poll-only.
+
+The whole member is optional. Absence means the feature is off, and a client
+that does not recognise it continues to work — the `poll`/`realtime` rule.
+
+Five endpoints serve the feed, all under the same auth middleware and with
+no resource-level gates (the rows are the authenticated user's own, so the
+middleware's `401` is the only gate):
+
+- `GET /notifications?page=N` — the standard paginated envelope plus one
+  top-level `unread` count, with the same weak-ETag/304 behavior as the
+  other reads, so an unchanged badge poll costs a few hundred bytes:
+
+  ```json
+  {
+    "data": [
+      { "id": "<uuid>", "title": "Order shipped", "body": null,
+        "status": "success", "color": null,
+        "date": "2026-08-31T10:00:00Z", "readAt": null,
+        "actions": [ { "label": "View", "url": "https://..." } ] }
+    ],
+    "meta": { "current_page": 1, "last_page": 3, "per_page": 20,
+      "total": 41 },
+    "unread": 5
+  }
+  ```
+
+  Rows are the user's Filament-written notifications (`data->format =
+  'filament'`), newest first; `per_page` is the server's list page size and
+  is not client-controllable. `title`/`body` are published as stored and
+  rendered as plain text — a markdown title degrades to its raw text.
+  `status`/`color` carry the stored semantic vocabulary
+  (`success`/`warning`/`danger`/`info`) or null. `date` (creation) and
+  `readAt` are ISO-8601 UTC; `readAt` null means unread. `icon`,
+  `iconColor`, `view` and `viewData` are never published — a heroicon name
+  and a Blade view are capabilities no client of this contract can honour;
+  a view-only notification still publishes its stored title/body fields.
+  `actions` keeps only entries with a non-empty `url` (label + url only,
+  per-entry fail-closed), because a Livewire event-dispatching action
+  cannot run headlessly.
+- `POST /notifications/{id}/read` → `{ "unread": n }`, the remaining unread
+  count. An unknown, foreign or non-uuid id is a `404` — the query is
+  scoped to the user, so a cross-user id is indistinguishable from a
+  missing one.
+- `POST /notifications/read-all` → `{ "unread": 0 }`.
+- `DELETE /notifications/{id}` → `204` (the web bell's per-row "close").
+- `DELETE /notifications` → `204`, deleting read **and** unread rows — the
+  web bell's "clear" verbatim.
+
+Mark-unread is deliberately not part of the contract.
+
 ## Reading `rules.numeric` and `rules.messages` as a client
 
 - **`rules.numeric`** answers "does Laravel compare `min`/`max` as a VALUE or

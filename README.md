@@ -1947,7 +1947,8 @@ Deliberately out of scope — please do not propose them: a login/auth flow
 actions, and `TableWidget` / arbitrary Blade or Livewire views (no data
 contract to read).
 
-Development happens in a private monorepo; this repository is its public
-snapshot. Issues and pull requests are welcome here — accepted changes are
-ported into the monorepo with credit in the changelog and ship in the next
-release, so a PR may be closed as "merged" without a merge commit.
+## Contributing
+
+Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md)
+for how this repository relates to the private monorepo it is a snapshot of,
+how to run the suite locally, and the ground rules that trip newcomers.
